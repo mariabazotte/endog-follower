@@ -1,0 +1,33 @@
+#ifndef DE_STRONG_WEAK_FOLLOWER_SOLVER_HPP
+#define DE_STRONG_WEAK_FOLLOWER_SOLVER_HPP
+
+#include "gurobi_c++.h"
+#include "../../input/input.hpp"
+#include "../../instance/instance.hpp"
+#include "../followersolver.hpp"
+
+class DEDepStrWkFollowerSolver : public AbstractFollowerSolver {
+    protected:
+        GRBVar beta;
+        GRBVar obj;
+
+        void create(){
+            defineOptFollower();
+            definePesFollower();
+            defineLeaderObj();
+        }
+
+        void defineLeaderObj();
+
+    public:
+        DEDepStrWkFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader) :
+                                AbstractFollowerSolver(input,instance,leader) {}
+        
+        ~DEDepStrWkFollowerSolver() {}
+
+        double evaluate();
+
+        void computeStrongWeakSolutions();
+};
+
+#endif
