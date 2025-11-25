@@ -5,7 +5,7 @@
 #SBATCH --time=7:00:00
 #SBATCH --array=1-960
 #SBATCH --output=../slurm/test_%A_%a.out
-#SBATCH --account=ctb-dionneg1
+#SBATCH --account=def-vidalthi
 
 i=1
 seed_sce=0
@@ -26,7 +26,7 @@ do
     do
         if [ $SLURM_ARRAY_TASK_ID -eq $i ]
         then
-            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 0 -fix_strwk $fixcoop -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -nbvalidatescenariosSAA $nbvalidatescenarios
+            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 0 -fix_strwk $fixcoop -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -nbvalidatescenarios $nbvalidatescenarios
         fi
         (( i = $i +1 ))
     done
@@ -37,7 +37,7 @@ do
         # Proportional
         if [ $SLURM_ARRAY_TASK_ID -eq $i ]
         then
-            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 0 -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 0 -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
         fi
         (( i = $i +1 ))
 
@@ -46,7 +46,7 @@ do
         do
             if [ $SLURM_ARRAY_TASK_ID -eq $i ]
             then
-                ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 1 -thr_param $param -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+                ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 1 -thr_param $param -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
             fi
             (( i = $i +1 ))
         done
@@ -56,7 +56,7 @@ do
         do
             if [ $SLURM_ARRAY_TASK_ID -eq $i ]
             then
-                ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 2 -str_param $param -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+                ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 2 -str_param $param -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
             fi
             (( i = $i +1 ))
         done
@@ -66,7 +66,7 @@ do
         do
             if [ $SLURM_ARRAY_TASK_ID -eq $i ]
             then
-                ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 3 -frag_param $param -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+                ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 1 -dep_strwk 3 -frag_param $param -sol $approach -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
             fi
             (( i = $i +1 ))
         done
@@ -77,7 +77,7 @@ do
     # Neutral 
     if [ $SLURM_ARRAY_TASK_ID -eq $i ]
     then
-        ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 2 -dep_gen 0 -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+        ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 2 -dep_gen 0 -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
     fi
     (( i = $i +1 ))
 
@@ -88,14 +88,14 @@ do
         # Proportional
         if [ $SLURM_ARRAY_TASK_ID -eq $i ]
         then
-            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 2 -dep_gen 1 -nb_intv $nbint -scal_param $scaling -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 2 -dep_gen 1 -nb_intv $nbint -scal_param $scaling -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
         fi
         (( i = $i +1 ))
 
         # Strong Fragile
         if [ $SLURM_ARRAY_TASK_ID -eq $i ]
         then
-            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 2 -dep_gen 2 -nb_intv $nbint -scal_param $scaling -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenariosSAA $nbvalidatescenarios
+            ./exe -instancefile "../data/instances/denegre-miblp_20_15_50_0110_10_${instance}.txt" -follower 2 -dep_gen 2 -nb_intv $nbint -scal_param $scaling -near_opt 1 -eps_near_opt $epsnearopt -nbthreads $nbthreads -timelimit $timelimit -verbose $verbose -seed $seed_sce -nbproblemsSAA $nbproblems -nbscenariosSAA $nbscenarios -nbvalidatescenarios $nbvalidatescenarios
         fi
         (( i = $i +1 ))
     done

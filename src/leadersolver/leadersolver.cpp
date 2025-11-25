@@ -12,7 +12,13 @@ std::string AbstractLeaderSolver::writeComp() const {
         obj += instance.getModel()->leader_vars[i].obj_leader*getX_(i);
 
     // Compute follower strong and weak solutions for the fixed leader decision.
-    getFollower()->computeStrongWeakSolutions();
+    getFollower()->computeStrongWeakInteriorSolutions();
+
+    double leader_val = 0.0;
+    for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
+        leader_val += instance.getModel()->follower_vars[i].obj_leader*getFollower()->getYi_(i);
+
+    std::cout << "leader: " << leader_val << std::endl;
 
     std::string output = "";
 
@@ -68,7 +74,7 @@ std::string AbstractLeaderSolver::writeComp() const {
                 std::to_string(param) + ";" + std::to_string((obj+val)) + ";\n";
     }
 
-    
+    // Dependent General configuations.
 
     // Uniform
     val = computeGeneralEval(Input::TypesDepGeneral::Neutral, 0, 0.0);
@@ -76,6 +82,8 @@ std::string AbstractLeaderSolver::writeComp() const {
     output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
                 std::to_string(Input::TypesDepGeneral::Neutral) + ";-;" + 
                 std::to_string((obj+val)) + ";\n";
+
+    std::cout << "---------------------" << std::endl;
 
     // Proportional 
     for(int nb_int: instance.getDepGeneralIntConfigs()){
@@ -86,6 +94,7 @@ std::string AbstractLeaderSolver::writeComp() const {
                     std::to_string(Input::TypesDepGeneral::GenProportional) + ";" +
                     std::to_string(nb_int) + "/" + std::to_string(scal) + ";" + 
                     std::to_string((obj+val)) + ";\n";
+            exit(0);
         }
     }
 
@@ -106,8 +115,8 @@ std::string AbstractLeaderSolver::writeComp() const {
 double AbstractLeaderSolver::computeGeneralEval(Input::TypesDepGeneral eval_behavior, int nb_int, double scaling) const {
 
     // Initialize y_eval and y_test.
-    std::vector<double> y_eval(getFollower()->getYs_(), getFollower()->getYs_() + instance.getModel()->nb_follower_vars);
-    std::vector<double> y_test(getFollower()->getYs_(), getFollower()->getYs_() + instance.getModel()->nb_follower_vars);
+    std::vector<double> y_eval(getFollower()->getYw_(), getFollower()->getYw_() + instance.getModel()->nb_follower_vars);
+    std::vector<double> y_test(getFollower()->getYw_(), getFollower()->getYw_() + instance.getModel()->nb_follower_vars);
     
     double eval = 0.0;
     for(int s = 0; s < instance.getNbValidateScenarios(); ++s){
@@ -116,23 +125,34 @@ double AbstractLeaderSolver::computeGeneralEval(Input::TypesDepGeneral eval_beha
         
         // Computing alpha_max.
         double eval_alpha_max = instance.defineEvalMaxStep(s,getX_(),y_eval,getFollower()->getFollowerOptimalObj());
+
+        std::cout << "Alpha values: " << eval_alpha_min << " " << eval_alpha_max << std::endl;
         
         // Computing alpha.
         double tau = instance.getGeneralStepEval(s);
         double eval_alpha = (1.0-tau)*eval_alpha_min + tau*eval_alpha_max;
 
-        if(input.getTypeDepGeneral() == Input::TypesDepGeneral::Neutral){
+        std::cout << "Alpha final: " << eval_alpha << std::endl;
+
+        if(eval_behavior == Input::TypesDepGeneral::Neutral){
             // New point always accepted.
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
+            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
                 y_eval[i] = y_eval[i] + eval_alpha*instance.getGeneralDirectionEval(s,i);
+            }
         }
-        else {
+        else{
             // Compute possible new point.
             for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
                 y_test[i] = y_eval[i] + eval_alpha*instance.getGeneralDirectionEval(s,i);
 
+            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+                std::cout << y_eval[i] << " " << y_test[i] << std::endl;
+            }
+
             // Compute probability to accept new point.
             double h = instance.getEvalDepGeneralProb(getFollower()->getFollowerOptimalObj(),getX_(),y_test,eval_behavior,nb_int,scaling)/instance.getEvalDepGeneralProb(getFollower()->getFollowerOptimalObj(),getX_(),y_eval,eval_behavior,nb_int,scaling);
+
+            std::cout << "probability: " <<  instance.getGeneralAccepEval(s) << " " << h << std::endl;
 
             // Accept new point under this condition.
             if(instance.getGeneralAccepEval(s) <= h){

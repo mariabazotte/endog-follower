@@ -9,8 +9,8 @@
 class FixStrongWeakFollowerSolver : public AbstractFollowerSolver {
     protected:
         void create(){
-            defineOptFollower();
-            definePesFollower();
+            defineOptimisticFollower();
+            definePessimisticFollower();
             defineLeaderObj();
         }
 
@@ -24,7 +24,7 @@ class FixStrongWeakFollowerSolver : public AbstractFollowerSolver {
 
         double evaluate();
 
-        void computeStrongWeakSolutions();
+        void computeStrongWeakInteriorSolutions();
 };
 
 #endif

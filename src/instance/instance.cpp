@@ -1,17 +1,16 @@
 #include "instance.hpp"
 
-// TODO
-//problems: unboundness for lower level (cannot use instance at all - include something alerting that)
-//unboundness for upper level : not able to use general proportional and define upper bound too for strong fragile case (include a test in c++)
 
 Instance::Instance(const Input & input): input(input), instance_file(input.getInstanceFile()),seed(input.getSeed()),
-                                    rd_engine(input.getSeed()),uniform_eps(1e-12,1.0-1e-12),uniform(0.0,1.0),normal(0.0,1.0),
+                                    rd_engine(input.getSeed()),uniform_eps(1e-12,1.0-1e-12),uniform(0.0,1.0),normal(0.0,1.0),coordinate_mcmc(true),
                                     nb_saa_problems(input.getNbProblemsSAA()),nb_saa_scenarios(input.getNbScenariosSAA()),
                                     nb_val_scenarios(input.getNbValidateScenarios()){
     defineName();
     defineCriticalValues(); 
     bilevelmodel = new BilevelModel(instance_file);
+    verifyInstance();
     defineDepGenParams();
+    uniform_int = std::uniform_int_distribution<int>(0, bilevelmodel->nb_follower_vars-1);
     std::cout << "Read instance finished..." << std::endl;
     
     double time_ = time(NULL);
@@ -47,6 +46,16 @@ void Instance::defineCriticalValues(){
     else if(nb_saa_problems >= 80 && nb_saa_problems <= 199) critical_tstudent = 1.66;
 }
 
+void Instance::verifyInstance(){
+    if(bilevelmodel->leader_lb <= -bilevelmodel->inf || bilevelmodel->leader_ub >= bilevelmodel->inf)
+        throw std::runtime_error("");
+    if(bilevelmodel->follower_lb <= -bilevelmodel->inf || bilevelmodel->follower_ub >= bilevelmodel->inf)
+        throw std::runtime_error("");
+// TODO
+// problems: unboundness for lower level (cannot use instance at all - include something alerting that)
+// unboundness for upper level : not able to use general proportional and define upper bound too for strong fragile case (include a test in c++)
+}
+
 void Instance::defineDepGenParams(){
     // Define extra parameters for decision-dependent general case.
     gen_nb_intervals = input.getNbIntervalsGeneral();
@@ -67,10 +76,12 @@ void Instance::defineDepGenParams(){
         gen_max_probab = gen_ref_pt_probab + input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc);
     }if(input.getTypeDepGeneral() == Input::TypesDepGeneral::StrongFragile){
         gen_ref_pt_probab = 1.0;
-        gen_min_probab = std::exp(-input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc));
-        gen_max_probab = std::exp(input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc));
+        gen_min_probab = std::exp(-input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
+        gen_max_probab = std::exp(input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Instance::generateScenarios(){
     // Define SAA scenarios for Decision-Dependent Strong Weak using SAA method
@@ -158,27 +169,43 @@ void Instance::nullSpaceFollowerEqConstrs(Eigen::MatrixXd & N){
 }
 
 void Instance::dirDepGeneralScenario(Eigen::MatrixXd & N, std::vector<double> & dir){
-    if(bilevelmodel->nb_follower_eq_constrs > 0 || input.isFollowerNearOpt() == false){
-        if(N.cols() == 0) {
-            dir.resize(bilevelmodel->nb_follower_vars,0.0); 
+    if(coordinate_mcmc == true && bilevelmodel->nb_follower_eq_constrs == 0){
+        double chosen = uniform_int(rd_engine);
+        double direct = uniform(rd_engine);
+
+        dir.resize(bilevelmodel->nb_follower_vars, 0.0);
+        if(direct <= 0.5) dir[chosen] = 1.0;
+        else dir[chosen] = -1.0;
+
+        dir[chosen] = 0.0;
+        dir[3] = 0.0765625;
+        dir[8] = -0.107188;
+        dir[9] = -0.06125;
+    }else{
+        if(bilevelmodel->nb_follower_eq_constrs > 0 || input.isFollowerNearOpt() == false){
+            if(N.cols() == 0) {
+                dir.resize(bilevelmodel->nb_follower_vars,0.0); 
+            }else{
+                // Sample a random vector in the null space
+                Eigen::VectorXd aux = N * (Eigen::VectorXd::NullaryExpr(N.cols(), [&](){ return normal(rd_engine); })); 
+                // Normalize to unit length
+                aux.normalize();
+                // Pass information to vector 
+                dir.assign(aux.data(), aux.data() + aux.size());
+            }
         }else{
-            // Sample a random vector in the null space
-            Eigen::VectorXd aux = N * (Eigen::VectorXd::NullaryExpr(N.cols(), [&](){ return normal(rd_engine); })); 
+            // Sample a normal random vector 
+            Eigen::VectorXd aux(bilevelmodel->nb_follower_vars);
+            for (int id = 0; id < bilevelmodel->nb_follower_vars; ++id) aux[id] = normal(rd_engine);
             // Normalize to unit length
             aux.normalize();
             // Pass information to vector 
             dir.assign(aux.data(), aux.data() + aux.size());
         }
-    }else{
-        // Sample a normal random vector 
-        Eigen::VectorXd aux(bilevelmodel->nb_follower_vars);
-        for (int id = 0; id < bilevelmodel->nb_follower_vars; ++id) aux[id] = normal(rd_engine);
-        // Normalize to unit length
-        aux.normalize();
-        // Pass information to vector 
-        dir.assign(aux.data(), aux.data() + aux.size());
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 double Instance::getStrongWeakProbab(double opt_val_follower) const{
     if(input.getFollowerBehavior() == Input::FollowerBehavior::FixStrongWeak) 
@@ -215,6 +242,8 @@ double Instance::getEvalDepStrongWeakProbab(double opt_val_follower, Input::Type
     }else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent Strong Weak Behavior."));
 }
 
+////////////////////////////////////////////////////////////////////////////////////////////////
+
 double Instance::getDepGeneralProbab(double opt_val_follower, const double * x_, std::vector<double> & y_) const{
     // Compute leader value
     double leader_value = 0.0;
@@ -249,9 +278,12 @@ double Instance::getEvalDepGeneralProb(double opt_val_follower, const double * x
     for(int i = 0; i < bilevelmodel->nb_leader_vars; ++i){
         leader_value += bilevelmodel->leader_vars[i].obj_leader*x_[i];
     }
+    double only_leader_value = 0.0;
     for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
         leader_value += bilevelmodel->follower_vars[i].obj_leader*y_[i];
+        only_leader_value += bilevelmodel->follower_vars[i].obj_leader*y_[i];
     }
+    std::cout << "leader value: " << leader_value << " " << only_leader_value << std::endl;
 
     // Central point leader value
     double Fc = (bilevelmodel->leader_lb + bilevelmodel->leader_ub)/2.0;
@@ -271,12 +303,19 @@ double Instance::getEvalDepGeneralProb(double opt_val_follower, const double * x
     if(eval_behavior == Input::TypesDepGeneral::GenProportional){
         double delta = (bilevelmodel->leader_ub - bilevelmodel->leader_lb)/2.0;
         ref_probab = scaling*0.5*delta;
+        std::cout << "proportional " << (ref_probab + m*(leader_value - Fc)) << std::endl;
+    }
+
+    if(eval_behavior == Input::TypesDepGeneral::StrongFragile){
+        std::cout << "strongfragile " << (ref_probab*std::exp(m*(leader_value-Fc)/(bilevelmodel->leader_ub - bilevelmodel->leader_lb) )) << std::endl;
     }
 
     if(eval_behavior == Input::TypesDepGeneral::GenProportional) return (ref_probab + m*(leader_value - Fc));
-    else if(input.getTypeDepGeneral() == Input::TypesDepGeneral::StrongFragile) return (ref_probab*std::exp(m*(leader_value-Fc)));
+    else if(eval_behavior == Input::TypesDepGeneral::StrongFragile) return (ref_probab*std::exp(m*(leader_value-Fc)/(bilevelmodel->leader_ub - bilevelmodel->leader_lb) ));
     else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent General Behavior."));
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Instance::defineGeneralStepInfo(int pr, std::vector<double> & coeff_obj,
                                             std::vector<std::vector<double>> & coeff,
@@ -319,12 +358,12 @@ void Instance::defineGeneralStepInfo(int pr, std::vector<double> & coeff_obj,
                 else coeff[s][c] += constr.coeffs[var.id]*getGeneralDirection(pr,s,i);
             }
             if(constr.sense == '<'){
-                if(coeff[s][c] > 0) constrs[s][1].push_back(c);
-                else if(coeff[s][c] < 0) constrs[s][0].push_back(c);
+                if(coeff[s][c] >= 1e-6) constrs[s][1].push_back(c);
+                else if(coeff[s][c] <= -1e-6) constrs[s][0].push_back(c);
             }
             if(constr.sense == '>'){
-                if(coeff[s][c] > 0) constrs[s][0].push_back(c);
-                else if(coeff[s][c] < 0) constrs[s][1].push_back(c);
+                if(coeff[s][c] >= 1e-6) constrs[s][0].push_back(c);
+                else if(coeff[s][c] <= -1e-6) constrs[s][1].push_back(c);
             }
         }
     }
@@ -334,14 +373,15 @@ void Instance::defineGeneralStepInfo(int pr, std::vector<double> & coeff_obj,
         coeff_obj[s] = 0.0;
         for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
             BilevelVariable var = bilevelmodel->follower_vars[i];
+            
             if(pr == nb_saa_problems) coeff_obj[s] += var.obj_follower*getGeneralDirectionEval(s,i);
             else coeff_obj[s] += var.obj_follower*getGeneralDirection(pr,s,i);
         }
         // Also consider near optimality constraint in this case
         if(input.isFollowerNearOpt() == true){ 
             // This constraints is <=.
-            if(coeff_obj[s] > 0) constrs[s][1].push_back(bilevelmodel->nb_follower_constrs);
-            else if(coeff_obj[s] < 0) constrs[s][0].push_back(bilevelmodel->nb_follower_constrs);
+            if(coeff_obj[s] >= 1e-6) constrs[s][1].push_back(bilevelmodel->nb_follower_constrs);
+            else if(coeff_obj[s] <= -1e-6) constrs[s][0].push_back(bilevelmodel->nb_follower_constrs);
         }
     }
 
@@ -355,12 +395,12 @@ void Instance::defineGeneralStepInfo(int pr, std::vector<double> & coeff_obj,
             else dir = getGeneralDirection(pr,s,i);
 
             if(!(var.lb <= -bilevelmodel->inf)){
-                if(dir > 0) bdlbs[s][0].push_back(i);
-                else if(dir < 0) bdlbs[s][1].push_back(i);
+                if(dir >= 1e-6) bdlbs[s][0].push_back(i);
+                else if(dir <= -1e-6) bdlbs[s][1].push_back(i);
             }
             if(!(var.ub >=  bilevelmodel->inf)){
-                if(dir > 0) bdubs[s][1].push_back(i);
-                else if(dir < 0) bdubs[s][0].push_back(i);
+                if(dir >= 1e-6) bdubs[s][1].push_back(i);
+                else if(dir <= -1e-6) bdubs[s][0].push_back(i);
             }
         }
     }
@@ -385,7 +425,22 @@ double Instance::defineEvalMinStep(int s, const double * x_, std::vector<double>
                 BilevelVariable var = bilevelmodel->follower_vars[i];
                 value += constr.coeffs[var.id]*y_[i];
             }
-            alpha_min = std::max(alpha_min, (constr.rhs - value)/eval_coeff_alpha[s][c]);
+
+            if(constr.sense == '>' && (constr.rhs - value) >= 1e-6){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+            if(constr.sense == '<' && (constr.rhs - value) <= -1e-6){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+
+            // Avoid problems with numeric instability.
+            double diff = (constr.rhs - value);
+            if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha value.
+            alpha_min = std::max(alpha_min, diff/eval_coeff_alpha[s][c]);
+
+            std::cout << "min \t" << constr.rhs << " " << value << " " << eval_coeff_alpha[s][c] << " " << diff/eval_coeff_alpha[s][c] << std::endl;
         }
         // Near optimality constraint.
         else{
@@ -394,21 +449,51 @@ double Instance::defineEvalMinStep(int s, const double * x_, std::vector<double>
                 BilevelVariable var = bilevelmodel->follower_vars[i];
                 value += var.obj_follower*y_[i];
             }
-            alpha_min = std::max(alpha_min, ((1.0 + input.getEpsNearOpt())*fs_ - value)/eval_coeff_obj_alpha[s]);
+
+            if(((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value) <= -1e-6){
+                throw std::runtime_error("Constraint on near optimality was not respected by current y.");
+            }
+            
+            // Avoid problems with numerical instability.
+            double diff = ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value);
+            if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha min.
+            alpha_min = std::max(alpha_min, diff/eval_coeff_obj_alpha[s]);
+
+            std::cout << "min obj\t" << (1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub << " " << value << " " << eval_coeff_obj_alpha[s] << " " << ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value)/eval_coeff_obj_alpha[s] << std::endl;
         }
     }
 
     // Lower bound constraints.
     for(int i: eval_bdlbs_alpha[s][0]){
         BilevelVariable var = bilevelmodel->follower_vars[i];
-        alpha_min = std::max(alpha_min, (var.ub - y_[i])/getGeneralDirectionEval(s,i));
+
+        if((var.lb - y_[i]) >= 1e-6){
+            throw std::runtime_error("Lower bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+        
+        // Update alpha min.
+        alpha_min = std::max(alpha_min, (var.lb - y_[i])/getGeneralDirectionEval(s,i));
+        
+        std::cout << "min lb\t" << var.lb << " " << y_[i] << " " << getGeneralDirectionEval(s,i) << " " << (var.lb - y_[i])/getGeneralDirectionEval(s,i) << std::endl;
     }
 
     // Upper bound constraints.
     for(int i: eval_bdubs_alpha[s][0]){
         BilevelVariable var = bilevelmodel->follower_vars[i];
-        alpha_min = std::max(alpha_min, (var.lb - y_[i])/getGeneralDirectionEval(s,i));
+
+        if((var.ub - y_[i]) <= -1e-6){
+            throw std::runtime_error("Upper bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+
+        // Update alpha min.
+        alpha_min = std::max(alpha_min, (var.ub - y_[i])/getGeneralDirectionEval(s,i));
+        
+        std::cout << "min ub\t" << var.ub << " " << y_[i] << " " << getGeneralDirectionEval(s,i) << " " << (var.ub - y_[i])/getGeneralDirectionEval(s,i) << std::endl;
     }
+
+    if(alpha_min >= 1e-6) throw std::runtime_error(std::string("Incorrect min step value: Infeasible current point."));
 
     return alpha_min;
 }
@@ -432,7 +517,22 @@ double Instance::defineEvalMaxStep(int s, const double * x_, std::vector<double>
                 BilevelVariable var = bilevelmodel->follower_vars[i];
                 value += constr.coeffs[var.id]*y_[i];
             }
-            alpha_max = std::min(alpha_max, (constr.rhs - value)/eval_coeff_alpha[s][c]);
+
+            if(constr.sense == '>' && (constr.rhs - value) >= 1e-6){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+            if(constr.sense == '<' && (constr.rhs - value) <= -1e-6){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+
+            // Avoid problems with numeric instability.
+            double diff = (constr.rhs - value);
+            if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha max.
+            alpha_max = std::min(alpha_max, diff/eval_coeff_alpha[s][c]);
+
+            std::cout << "max \t" << constr.rhs << " " << value << " " << eval_coeff_alpha[s][c] << " " << diff/eval_coeff_alpha[s][c] << std::endl;
         }
         // Near optimality constraint.
         else{
@@ -441,24 +541,56 @@ double Instance::defineEvalMaxStep(int s, const double * x_, std::vector<double>
                 BilevelVariable var = bilevelmodel->follower_vars[i];
                 value += var.obj_follower*y_[i];
             }
-            alpha_max = std::min(alpha_max, ((1.0 + input.getEpsNearOpt())*fs_ - value)/eval_coeff_obj_alpha[s]);
+
+            if(((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value) <= -1e-6){
+                throw std::runtime_error("Constraint on near optimality was not respected by current y.");
+            }
+
+            // Avoid problems with numerical instability.
+            double diff = ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value);
+            if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha_max value.
+            alpha_max = std::min(alpha_max, diff/eval_coeff_obj_alpha[s]);
+
+            std::cout << "max obj\t" << (1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub << " " << value << " " << eval_coeff_obj_alpha[s] << " " << diff/eval_coeff_obj_alpha[s] << std::endl;
         }
     }
 
     // Lower bound constraints.
     for(int i: eval_bdlbs_alpha[s][1]){
         BilevelVariable var = bilevelmodel->follower_vars[i];
-        alpha_max = std::min(alpha_max, (var.ub - y_[i])/getGeneralDirectionEval(s,i));
+
+        if((var.lb - y_[i]) >= 1e-6){
+            throw std::runtime_error("Lower bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+
+        // Update alpha max.
+        alpha_max = std::min(alpha_max, (var.lb - y_[i])/getGeneralDirectionEval(s,i));
+
+        std::cout << "max lb\t" << var.lb << " " << y_[i] << " " << getGeneralDirectionEval(s,i) << " " << (var.lb - y_[i])/getGeneralDirectionEval(s,i) << std::endl;
     }
 
     // Upper bound constraints.
     for(int i: eval_bdubs_alpha[s][1]){
         BilevelVariable var = bilevelmodel->follower_vars[i];
-        alpha_max = std::min(alpha_max, (var.lb - y_[i])/getGeneralDirectionEval(s,i));
+
+        if((var.ub - y_[i]) <= -1e-6){
+            throw std::runtime_error("Upper bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+
+        // Define alpha max.
+        alpha_max = std::min(alpha_max, (var.ub - y_[i])/getGeneralDirectionEval(s,i));
+
+        std::cout << "max ub\t" << var.ub << " " << y_[i] << " " << getGeneralDirectionEval(s,i) << " " << (var.ub - y_[i])/getGeneralDirectionEval(s,i) << std::endl;
     }
+
+    if(alpha_max <= -1e-6) throw std::runtime_error(std::string("Incorrect max step value: Infeasible current point."));
 
     return alpha_max;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Instance::display() const{
     std::cout << "----------- INSTANCE PARAMS -------------" << std::endl;

@@ -15,7 +15,8 @@ double FixStrongWeakFollowerSolver::evaluate(){
     return eval; 
 }
 
-void FixStrongWeakFollowerSolver::computeStrongWeakSolutions(){
-    if(input.getFixCoopLevel() <= 0.0001) AbstractFollowerSolver::computeStrongWeakSolutions(true,false);
-    if(input.getFixCoopLevel() >= 0.9999) AbstractFollowerSolver::computeStrongWeakSolutions(false,true);
+void FixStrongWeakFollowerSolver::computeStrongWeakInteriorSolutions(){
+    if(input.getFixCoopLevel() <= 0.0001) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,false,true);
+    else if(input.getFixCoopLevel() >= 0.9999) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,true,true);
+    else AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,false,true);
 }

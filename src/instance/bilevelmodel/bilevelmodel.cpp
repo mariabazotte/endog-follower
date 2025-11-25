@@ -18,24 +18,28 @@ BilevelModel::BilevelModel(std::string instance_file) {
         // Reading Variables
         std::string name; char ty;
         double lb, ub, obju, objl;
-        for(int id = 0; id < nb_leader_vars; ++id){
-            file >> name;
-            file >> lb;
-            file >> ub;
-            file >> obju;
-            file >> ty;
-            if(ty != 'C' && ty != 'B' && ty != 'I') throw std::runtime_error(std::string("Incorrect instance file.")); 
-            leader_vars.push_back(BilevelVariable(id,name,lb,ub,obju,0.0,ty));
+        if(nb_leader_vars > 0){
+            for(int id = 0; id < nb_leader_vars; ++id){
+                file >> name;
+                file >> lb;
+                file >> ub;
+                file >> obju;
+                file >> ty;
+                if(ty != 'C' && ty != 'B' && ty != 'I') throw std::runtime_error(std::string("Incorrect instance file. Leader variables (C,B,I)")); 
+                leader_vars.push_back(BilevelVariable(id,name,lb,ub,obju,0.0,ty));
+            }
         }
-        for(int id = 0; id < nb_follower_vars; ++id){
-            file >> name;
-            file >> lb;
-            file >> ub;
-            file >> obju;
-            file >> objl;
-            file >> ty;
-            if(ty != 'C') throw std::runtime_error(std::string("Incorrect instance file.")); 
-            follower_vars.push_back(BilevelVariable(id+nb_leader_vars,name,lb,ub,obju,objl,ty));
+        if(nb_follower_vars > 0){
+            for(int id = 0; id < nb_follower_vars; ++id){
+                file >> name;
+                file >> lb;
+                file >> ub;
+                file >> obju;
+                file >> objl;
+                file >> ty;
+                if(ty != 'C') throw std::runtime_error(std::string("Incorrect instance file. Follower variables (C)")); 
+                follower_vars.push_back(BilevelVariable(id+nb_leader_vars,name,lb,ub,obju,objl,ty));
+            }
         }
 
         // Reading Constraints
@@ -43,17 +47,19 @@ BilevelModel::BilevelModel(std::string instance_file) {
         char sense;
         double rhs;
         double coeff;
-        for(int i = 0; i < nb_leader_constrs; ++i){
-            file >> name_constr;
-            file >> sense;
-            file >> rhs;
-            if(ty != '=' && ty != '<' && ty != '>') 
-                throw std::runtime_error(std::string("Incorrect instance file.")); 
-            leader_constrs.push_back(BilevelConstraint(name_constr,sense,rhs));
+        if(nb_leader_constrs > 0){
+            for(int i = 0; i < nb_leader_constrs; ++i){
+                file >> name_constr;
+                file >> sense;
+                file >> rhs;
+                if(ty != '=' && ty != '<' && ty != '>') 
+                    throw std::runtime_error(std::string("Incorrect instance file. Leader constraints (=,<,>)")); 
+                leader_constrs.push_back(BilevelConstraint(name_constr,sense,rhs));
 
-            for(int id = 0; id < nb_leader_vars; ++id) { // only leader variables in these constraints
-                file >> coeff;
-                leader_constrs[i].coeffs[id] = coeff;
+                for(int id = 0; id < nb_leader_vars; ++id) { // only leader variables in these constraints
+                    file >> coeff;
+                    leader_constrs[i].coeffs[id] = coeff;
+                }
             }
         }
 
@@ -61,10 +67,10 @@ BilevelModel::BilevelModel(std::string instance_file) {
             file >> name_constr;
             file >> sense;
             file >> rhs;
-            if(ty != '=' && ty != '<' && ty != '>') 
-                throw std::runtime_error(std::string("Incorrect instance file.")); 
+            if(sense != '=' && sense != '<' && sense != '>')  
+                throw std::runtime_error(std::string("Incorrect instance file. Follower constraints (=,<,>)")); 
             follower_constrs.push_back(BilevelConstraint(name_constr,sense,rhs));
-            if(ty == '=') nb_follower_eq_constrs += 1;
+            if(sense == '=') nb_follower_eq_constrs += 1;
 
             for(int id = 0; id < nb_leader_vars; ++id) {
                 file >> coeff;

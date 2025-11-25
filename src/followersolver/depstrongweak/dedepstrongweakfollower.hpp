@@ -12,8 +12,8 @@ class DEDepStrWkFollowerSolver : public AbstractFollowerSolver {
         GRBVar obj;
 
         void create(){
-            defineOptFollower();
-            definePesFollower();
+            defineOptimisticFollower();
+            definePessimisticFollower();
             defineLeaderObj();
         }
 
@@ -21,13 +21,13 @@ class DEDepStrWkFollowerSolver : public AbstractFollowerSolver {
 
     public:
         DEDepStrWkFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader) :
-                                AbstractFollowerSolver(input,instance,leader) {}
+                                AbstractFollowerSolver(input,instance,leader) { create(); }
         
         ~DEDepStrWkFollowerSolver() {}
 
         double evaluate();
 
-        void computeStrongWeakSolutions();
+        void computeStrongWeakInteriorSolutions();
 };
 
 #endif

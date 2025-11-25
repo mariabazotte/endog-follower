@@ -41,8 +41,9 @@ double DEDepStrWkFollowerSolver::evaluate(){
     return eval;
 }
 
-void DEDepStrWkFollowerSolver::computeStrongWeakSolutions(){
+void DEDepStrWkFollowerSolver::computeStrongWeakInteriorSolutions(){
     double beta_ = instance.getStrongWeakProbab(fs_);
-    if(beta_ <= 0.0001) AbstractFollowerSolver::computeStrongWeakSolutions(true,false);
-    if(beta_ >= 0.9999) AbstractFollowerSolver::computeStrongWeakSolutions(false,true);
+    if(beta_ <= 0.0001) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,false,true);
+    else if(beta_ >= 0.9999) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,true,true);
+    else AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,false,true);
 }

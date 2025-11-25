@@ -27,6 +27,9 @@ class Instance {
         std::uniform_real_distribution<> uniform_eps;  /* Uniform distribution for sampling scenarios. (decision-dependent strong weak) */
         std::uniform_real_distribution<> uniform;      /* Uniform distribution for sampling scenarios. (decision-dependent general) */
         std::normal_distribution<> normal;             /* Normal distribution for sampling scenarios. (decision-dependent general) */
+        std::uniform_int_distribution<> uniform_int;   /* Uniform int distribution for sampling scenarios. (decision-dependent general) */
+
+        bool coordinate_mcmc;                      /* 0-> Use full markov chain monte carlo hit and run, 1-> Use coordinate markov chain monte carlo hit and run. */
 
         double critical_tstudent;                  /* Critical value for t-student distribution. */
         double critical_normal;                    /* Critical value for normal distribution. */
@@ -78,6 +81,7 @@ class Instance {
 
         void defineName();                       /* Define instance name. */
         void defineCriticalValues();             /* Define critical values. */
+        void verifyInstance();                   /* */
         void defineDepGenParams();               /* Define auxiliar parameters for General Decision-dependent case. */
         
         void generateScenarios();                                              /* Generate scenarios. */
@@ -107,7 +111,7 @@ class Instance {
         double getCriticalNormal() const { return critical_normal;}
         double getCriticalTStudent() const { return critical_tstudent;}
 
-        double getStepSizeInterval() const { return 10; }
+        double getStepSizeInterval() const { return 100; }
         double getGeneralMaxProbab() const { return gen_max_probab; }
         double getGeneralMinProbab() const { return gen_min_probab; }
         double getGeneralRefProbab() const { return gen_ref_pt_probab; }

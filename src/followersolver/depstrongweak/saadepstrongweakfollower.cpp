@@ -24,17 +24,20 @@ void SAADepStrWkFollowerSolver::defineLeaderObj(){
 
     GRBVar *delta = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_CONTINUOUS);
     double bigm = instance.getModel()->leader_ub - instance.getModel()->leader_lb;
-    for(int s = 0; s < instance.getNbScenarios()-1; ++s){
-        leader->getGRBModel()->addConstr(delta[s] <= Fw - Fs);
-        leader->getGRBModel()->addConstr(delta[s] >= Fw - Fs - bigm*(1.0 - z[s]));
+    for(int s = 0; s < instance.getNbScenarios(); ++s){
+        leader->getGRBModel()->addConstr(delta[s] <= (Fw - Fs));
+        leader->getGRBModel()->addConstr(delta[s] >= (Fw - Fs) - bigm*(1.0 - z[s]));
         leader->getGRBModel()->addConstr(delta[s] <= bigm*z[s]);
+
+        leader->getGRBModel()->addGenConstrIndicator(z[s], 1, delta[s] == (Fw - Fs));
+        leader->getGRBModel()->addGenConstrIndicator(z[s], 0, delta[s] == 0.0);
     }
 
     Fw.set(GRB_DoubleAttr_Obj,1.0);
-    for(int s = 0; s < instance.getNbScenarios(); ++s) 
+    for(int s = 0; s < instance.getNbScenarios(); ++s) {
         delta[s].set(GRB_DoubleAttr_Obj,-(1.0/(double)instance.getNbScenarios()));
+    }
 
-    delete[] delta;
 }
 
 double SAADepStrWkFollowerSolver::evaluate(){
@@ -47,7 +50,8 @@ double SAADepStrWkFollowerSolver::evaluate(){
     return eval;
 }
 
-void SAADepStrWkFollowerSolver::computeStrongWeakSolutions(){
-    if(z[0].get(GRB_DoubleAttr_X) <= 0.001) AbstractFollowerSolver::computeStrongWeakSolutions(true,false);
-    if(z[instance.getNbScenarios()-1].get(GRB_DoubleAttr_X) >= 0.999) AbstractFollowerSolver::computeStrongWeakSolutions(false,true);
+void SAADepStrWkFollowerSolver::computeStrongWeakInteriorSolutions(){
+    if(z[0].get(GRB_DoubleAttr_X) <= 0.001) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,false,true);
+    else if(z[instance.getNbScenarios()-1].get(GRB_DoubleAttr_X) >= 0.999) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,true,true);
+    else AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,false,true);
 }

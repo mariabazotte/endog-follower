@@ -13,8 +13,8 @@ class SAADepStrWkFollowerSolver : public AbstractFollowerSolver {
         GRBVar * z = NULL;
 
         void create(){
-            defineOptFollower();
-            definePesFollower();
+            defineOptimisticFollower();
+            definePessimisticFollower();
             defineLeaderObj();
         }
 
@@ -22,13 +22,13 @@ class SAADepStrWkFollowerSolver : public AbstractFollowerSolver {
 
     public:
         SAADepStrWkFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader, int pr) :
-                                AbstractFollowerSolver(input,instance,leader), pr(pr) {}
+                                AbstractFollowerSolver(input,instance,leader), pr(pr) { create(); }
         
         ~SAADepStrWkFollowerSolver() { delete[] z; }
 
         double evaluate();
 
-        void computeStrongWeakSolutions();
+        void computeStrongWeakInteriorSolutions();
 };
 
 #endif

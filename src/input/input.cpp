@@ -10,7 +10,7 @@ void Input::defaultParams(){
     threshold_param = 2.0;  // This value corresponds to the special case of softmax
     strong_param = 3.0;
     fragile_param = 3.0;
-    strwk_nb_pwl_intervals = 100;
+    strwk_nb_pwl_intervals = 200;
 
     // Parameters for Type of Decision-Dependent General case
     gen_nb_intervals = 4;
@@ -47,7 +47,7 @@ Input::Input(int argc, char* argv[]){
             follower_behavior = FollowerBehavior(int_follower_behavior);
             mandatory += 1;
         }else if(std::string(argv[i]) == "-fix_strwk"){
-            fix_cooperation_level = std::stoi(argv[i+1]);  
+            fix_cooperation_level = std::stod(argv[i+1]);  
             if(follower_behavior == FollowerBehavior::FixStrongWeak) mandatory += 1;
         }else if(std::string(argv[i]) == "-dep_strwk"){
             int_type_dep_strongweak = std::stoi(argv[i+1]);
@@ -60,7 +60,7 @@ Input::Input(int argc, char* argv[]){
         }else if(std::string(argv[i]) == "-near_opt")  // Optional :: Instance and Behavior
             is_follower_near_optimal = std::stoi(argv[i+1]);  
         else if(std::string(argv[i]) == "-eps_near_opt")  
-            eps_near_optimal = std::stoi(argv[i+1]); 
+            eps_near_optimal = std::stod(argv[i+1]); 
         else if(std::string(argv[i]) == "-thr_param")  // Optional :: Strong Weak Decision-Dependent parameters
             threshold_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-str_param")
@@ -179,17 +179,17 @@ void Input::testParameters(){
         throw std::runtime_error(std::string("Wrong follower behavior value."));
         exit(0);
     }
-    if(int_type_dep_strongweak > 3){
-        throw std::runtime_error(std::string("Wrong type of strong weak decision-dependent cooperation value."));
-        exit(0);
+    if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
+        if(int_type_dep_strongweak > 3){
+            throw std::runtime_error(std::string("Wrong type of strong weak decision-dependent cooperation value."));
+            exit(0);
+        }
     }
-    if(int_type_dep_general > 2){
-        throw std::runtime_error(std::string("Wrong type of general decision-dependent cooperation value."));
-        exit(0);
-    }
-    if(int_solver_approach > 1){
-        throw std::runtime_error(std::string("Wrong solver approach value."));
-        exit(0);
+    if(follower_behavior == Input::FollowerBehavior::DepGeneral){
+        if(int_type_dep_general > 2){
+            throw std::runtime_error(std::string("Wrong type of general decision-dependent cooperation value."));
+            exit(0);
+        }
     }
 
     if(follower_behavior == Input::FollowerBehavior::FixStrongWeak){ // Use deterministic equivalent
@@ -200,6 +200,10 @@ void Input::testParameters(){
         int_solver_approach = 0;
         solver_approach = SolverApproach(int_solver_approach);
         std::cout << " Decision-dependent general type always solved with TR-SAA approach." << std::endl;
+    }
+    if(int_solver_approach > 1){
+        throw std::runtime_error(std::string("Wrong solver approach value."));
+        exit(0);
     }
 
     // If SAA is not used, then there is no SAA problem, only evaluation.

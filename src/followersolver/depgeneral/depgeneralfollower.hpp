@@ -18,7 +18,7 @@ class DepGeneralFollowerSolver : public AbstractFollowerSolver {
         GRBVar * w = NULL;
 
         void create(){
-            defineOptFollower();
+            defineInteriorFollower();
             defineLeaderObj();
         }
 
@@ -47,7 +47,7 @@ class DepGeneralFollowerSolver : public AbstractFollowerSolver {
 
         double evaluate();
 
-        void computeStrongWeakSolutions();
+        void computeStrongWeakInteriorSolutions();
 };
 
 #endif
