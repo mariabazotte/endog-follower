@@ -15,7 +15,7 @@
 
 class FollowerSolverFactory{
     public:
-        inline AbstractFollowerSolver* createFollowerSolver(const Input & input, const Instance & instance, int pr, LeaderSolver *leader){
+        inline AbstractFollowerSolver* createFollowerSolver(const Input & input, Instance & instance, int pr, LeaderSolver *leader){
             
             Input::FollowerBehavior chosenBehavior = input.getFollowerBehavior();
             Input::SolverApproach chosenApproach = input.getSolverApproach();

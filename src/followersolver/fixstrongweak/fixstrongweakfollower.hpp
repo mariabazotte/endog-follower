@@ -17,7 +17,7 @@ class FixStrongWeakFollowerSolver : public AbstractFollowerSolver {
         void defineLeaderObj();
 
     public:
-        FixStrongWeakFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader) : 
+        FixStrongWeakFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader) : 
                                     AbstractFollowerSolver(input,instance,leader) { create(); }
 
         ~FixStrongWeakFollowerSolver() {}

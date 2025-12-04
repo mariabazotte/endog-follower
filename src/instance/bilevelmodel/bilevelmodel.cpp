@@ -1,6 +1,7 @@
 #include "bilevelmodel.hpp"
 
 BilevelModel::BilevelModel(std::string instance_file) {
+    // Read bilevel model from file.
     std::ifstream file(instance_file.c_str());
     if(!file.fail()){ 
         nb_follower_eq_constrs = 0;
@@ -85,6 +86,18 @@ BilevelModel::BilevelModel(std::string instance_file) {
     }else{
         std::string errorMessage = std::string("Error: Could not open file ") + instance_file + std::string("\n");
         throw std::runtime_error(errorMessage);
+        exit(0);
+    }
+
+    // Verify bilevel model.
+    // Leader problem is not bounded: problem defining general decision-dependent case.
+    if(leader_lb <= -inf || leader_ub >= inf){
+        throw std::runtime_error("Leader problem is not bounded.");
+        exit(0);
+    }
+    // Follower problem is not bounded: problem defining strong-weak and general decision-dependent case.
+    if(follower_lb <= -inf || follower_ub >= inf){
+        throw std::runtime_error("Follower problem is not bounded.");
         exit(0);
     }
 }

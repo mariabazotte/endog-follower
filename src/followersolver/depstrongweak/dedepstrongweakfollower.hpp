@@ -20,7 +20,7 @@ class DEDepStrWkFollowerSolver : public AbstractFollowerSolver {
         void defineLeaderObj();
 
     public:
-        DEDepStrWkFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader) :
+        DEDepStrWkFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader) :
                                 AbstractFollowerSolver(input,instance,leader) { create(); }
         
         ~DEDepStrWkFollowerSolver() {}

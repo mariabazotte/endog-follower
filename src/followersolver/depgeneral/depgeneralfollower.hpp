@@ -41,7 +41,7 @@ class DepGeneralFollowerSolver : public AbstractFollowerSolver {
                                     std::vector<GRBVar*> &,std::vector<GRBVar*> &,std::vector<GRBVar*> &,std::vector<GRBVar*> &,std::vector<GRBVar*> &);
 
     public:
-        DepGeneralFollowerSolver(const Input &,const Instance &, LeaderSolver *, int);
+        DepGeneralFollowerSolver(const Input &, Instance &, LeaderSolver *, int);
         
         ~DepGeneralFollowerSolver() {}
 

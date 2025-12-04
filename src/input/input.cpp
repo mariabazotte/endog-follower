@@ -4,6 +4,7 @@ void Input::defaultParams(){
     // Problem definition
     is_follower_near_optimal = false; // Follower is optimal
     eps_near_optimal = 0.05;
+    is_near_optimal_mult = true;
     fix_cooperation_level = 0.5;
 
     // Parameters for Type of Decision-Dependent Stong Weak case
@@ -16,6 +17,13 @@ void Input::defaultParams(){
     gen_nb_intervals = 4;
     gen_scaling_param = 2.0;
     gen_step_explicit = true;
+    gen_intervals.resize(gen_nb_intervals+1);
+    gen_coeff_intervals.resize(gen_nb_intervals);
+    double interval = 1.0 / static_cast<double>(gen_nb_intervals);
+    for(int i = 0; i <= gen_nb_intervals; ++i){ 
+        gen_intervals[i] = i*interval;
+        if(i > 0) gen_coeff_intervals[i-1] = 0.5 - (gen_intervals[i-1]+gen_intervals[i])/2.0;
+    }
 
     // Problem solution
     int_solver_approach = 0;
@@ -26,13 +34,16 @@ void Input::defaultParams(){
     nb_threads = 1;
     seed = 0;
     verbose = 0;
-
     eps_bigm = 0.001;
                   
     // Parameters for SAA or evaluation analysis
     nbproblemsSAA = 5;
     nbscenariosSAA = 100;
-    nbvalidatescenarios = 5000;
+    nbthinningSAA = 5;
+
+    nbvalidateproblems = 1;
+    nbvalidatescenarios = 10000;
+    nbvalidatethinning = 50;
 }
 
 Input::Input(int argc, char* argv[]){
@@ -69,9 +80,18 @@ Input::Input(int argc, char* argv[]){
             fragile_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-nb_intv_pwl")
             strwk_nb_pwl_intervals = std::stoi(argv[i+1]);
-        else if(std::string(argv[i]) == "-nb_intv") // Optional :: General Decision-Dependent parameters
+        else if(std::string(argv[i]) == "-nb_intv"){ // Optional :: General Decision-Dependent parameters
             gen_nb_intervals = std::stoi(argv[i+1]);
-        else if(std::string(argv[i]) == "-scal_param")
+            gen_intervals.clear();
+            gen_coeff_intervals.clear();
+            gen_intervals.resize(gen_nb_intervals+1);
+            gen_coeff_intervals.resize(gen_nb_intervals);
+            double interval = 1.0 / static_cast<double>(gen_nb_intervals);
+            for(int i = 0; i <= gen_nb_intervals; ++i){ 
+                gen_intervals[i] = i*interval;
+                if(i > 0) gen_coeff_intervals[i-1] = 0.5 - (gen_intervals[i-1]+gen_intervals[i])/2.0;
+            }
+        }else if(std::string(argv[i]) == "-scal_param")
             gen_scaling_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-expl_step")
             gen_step_explicit = std::stoi(argv[i+1]);
@@ -90,8 +110,14 @@ Input::Input(int argc, char* argv[]){
             nbproblemsSAA = std::stoi(argv[i+1]); 
         else if(std::string(argv[i]) == "-nbscenariosSAA")
             nbscenariosSAA = std::stoi(argv[i+1]);
+        else if(std::string(argv[i]) == "-nbthinningSAA")
+            nbthinningSAA = std::stoi(argv[i+1]);
+        else if(std::string(argv[i]) == "-nbvalidateproblems")
+            nbvalidateproblems = std::stoi(argv[i+1]);
         else if(std::string(argv[i]) == "-nbvalidatescenarios")
-            nbvalidatescenarios = std::stoi(argv[i+1]);
+            nbvalidatescenarios = std::stoi(argv[i+1]); 
+        else if(std::string(argv[i]) == "-nbvalidatethinning")
+            nbvalidatethinning = std::stoi(argv[i+1]);
         else{
             std::cerr << "ERROR: Argument '" << argv[i] << "' not defined." << std::endl;
             throw std::runtime_error(std::string("Incorrect line of command"));

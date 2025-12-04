@@ -8,7 +8,7 @@
 
 class LeaderSolverFactory{
     public:
-        inline AbstractLeaderSolver* createLeaderSolver(const Input & input, const Instance & instance, std::string name){
+        inline AbstractLeaderSolver* createLeaderSolver(const Input & input, Instance & instance, std::string name){
             
             Input::SolverApproach chosenSolverApproach = input.getSolverApproach();
             switch (chosenSolverApproach)

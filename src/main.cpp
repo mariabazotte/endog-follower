@@ -3,6 +3,7 @@
 #include <fstream>
 #include <exception>
 #include <iterator>  
+#include <pybind11/embed.h> // for py::scoped_interpreter
 
 #include "input/input.hpp"
 #include "instance/instance.hpp"
@@ -10,6 +11,9 @@
 #include "leadersolver/leadersolver.hpp"
 
 int main(int argc, char *argv[]) {
+	// Create
+	py::scoped_interpreter guard{};  // start Python
+
 	/* Data information. */
 	try{
         // Read input.

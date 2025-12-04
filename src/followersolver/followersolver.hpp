@@ -10,7 +10,7 @@ class LeaderSolver;
 class AbstractFollowerSolver {
     protected:
         const Input & input;
-        const Instance & instance;
+        Instance & instance;
 
         LeaderSolver *leader;        // Leader problem.
 
@@ -32,10 +32,10 @@ class AbstractFollowerSolver {
         double Fs_;                  // Auxiliar parameters taking the value of the variables when problem is solved.
         double Fw_;
 
-        double fs_;
-        double fs_eps_;
-        double fw_eps_;
-        double fi_eps_;
+        long double fs_;
+        long double fs_eps_;
+        long double fw_eps_;
+        long double fi_eps_;
 
         double *ys_ = NULL;
         double *yw_ = NULL;
@@ -80,7 +80,7 @@ class AbstractFollowerSolver {
         void computeStrongWeakInteriorSolutions(bool, bool, bool);
         
     public:
-        AbstractFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader) :
+        AbstractFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader) :
                                 input(input), instance(instance), leader(leader), fs_not_init(true) {}
 
         virtual ~AbstractFollowerSolver() { 

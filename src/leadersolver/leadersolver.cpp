@@ -41,6 +41,7 @@ std::string AbstractLeaderSolver::writeComp() const {
               std::to_string(Input::TypesDepStrongWeak::Proportional) + ";-;" + 
               std::to_string((obj+val)) + ";\n";
 
+
     // Threshold
     for(double param : instance.getDepStrongWeakThrConfigs()){
         beta = instance.getEvalDepStrongWeakProbab(getFollower()->getFollowerOptimalObj(),
@@ -77,7 +78,10 @@ std::string AbstractLeaderSolver::writeComp() const {
     // Dependent General configuations.
 
     // Uniform
-    val = computeGeneralEval(Input::TypesDepGeneral::Neutral, 0, 0.0);
+    double eval, var_eval, f_eval, f_var_eval;
+    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,
+        getX_(),getFollower()->getYi_(),getFollower()->getFollowerOptimalObj(),
+        Input::TypesDepGeneral::Neutral, 0, 0.0);
 
     output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
                 std::to_string(Input::TypesDepGeneral::Neutral) + ";-;" + 
@@ -85,97 +89,52 @@ std::string AbstractLeaderSolver::writeComp() const {
 
     std::cout << "---------------------" << std::endl;
 
+    exit(0);
+
     // Proportional 
     for(int nb_int: instance.getDepGeneralIntConfigs()){
         for(double scal: instance.getDepGeneralScalConfigs()){
-            val = computeGeneralEval(Input::TypesDepGeneral::GenProportional, nb_int, scal);
+            double eval, var_eval, f_eval, f_var_eval;
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,
+                getX_(),getFollower()->getYi_(),getFollower()->getFollowerOptimalObj(),
+                Input::TypesDepGeneral::GenProportional, nb_int, scal);
 
             output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
                     std::to_string(Input::TypesDepGeneral::GenProportional) + ";" +
                     std::to_string(nb_int) + "/" + std::to_string(scal) + ";" + 
                     std::to_string((obj+val)) + ";\n";
-            exit(0);
+            break;
         }
+        break;
     }
+
+    std::cout << "---------------------" << std::endl;
 
     // Strong Fragile 
     for(int nb_int: instance.getDepGeneralIntConfigs()){
         for(double scal: instance.getDepGeneralScalConfigs()){
-            val = computeGeneralEval(Input::TypesDepGeneral::StrongFragile, nb_int, scal);
+            double eval, var_eval, f_eval, f_var_eval;
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,
+                getX_(),getFollower()->getYi_(),getFollower()->getFollowerOptimalObj(),
+                Input::TypesDepGeneral::StrongFragile, nb_int, scal);
 
             output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
                     std::to_string(Input::TypesDepGeneral::StrongFragile) + ";" +
                     std::to_string(nb_int) + "/" + std::to_string(scal) + ";" + 
                     std::to_string((obj+val)) + ";\n";
+            break;
         }
+        break;
     }
     return output;
 }
 
-double AbstractLeaderSolver::computeGeneralEval(Input::TypesDepGeneral eval_behavior, int nb_int, double scaling) const {
-
-    // Initialize y_eval and y_test.
-    std::vector<double> y_eval(getFollower()->getYw_(), getFollower()->getYw_() + instance.getModel()->nb_follower_vars);
-    std::vector<double> y_test(getFollower()->getYw_(), getFollower()->getYw_() + instance.getModel()->nb_follower_vars);
-    
-    double eval = 0.0;
-    for(int s = 0; s < instance.getNbValidateScenarios(); ++s){
-        // Computing alpha_min.
-        double eval_alpha_min = instance.defineEvalMinStep(s,getX_(),y_eval,getFollower()->getFollowerOptimalObj());
-        
-        // Computing alpha_max.
-        double eval_alpha_max = instance.defineEvalMaxStep(s,getX_(),y_eval,getFollower()->getFollowerOptimalObj());
-
-        std::cout << "Alpha values: " << eval_alpha_min << " " << eval_alpha_max << std::endl;
-        
-        // Computing alpha.
-        double tau = instance.getGeneralStepEval(s);
-        double eval_alpha = (1.0-tau)*eval_alpha_min + tau*eval_alpha_max;
-
-        std::cout << "Alpha final: " << eval_alpha << std::endl;
-
-        if(eval_behavior == Input::TypesDepGeneral::Neutral){
-            // New point always accepted.
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                y_eval[i] = y_eval[i] + eval_alpha*instance.getGeneralDirectionEval(s,i);
-            }
-        }
-        else{
-            // Compute possible new point.
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-                y_test[i] = y_eval[i] + eval_alpha*instance.getGeneralDirectionEval(s,i);
-
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                std::cout << y_eval[i] << " " << y_test[i] << std::endl;
-            }
-
-            // Compute probability to accept new point.
-            double h = instance.getEvalDepGeneralProb(getFollower()->getFollowerOptimalObj(),getX_(),y_test,eval_behavior,nb_int,scaling)/instance.getEvalDepGeneralProb(getFollower()->getFollowerOptimalObj(),getX_(),y_eval,eval_behavior,nb_int,scaling);
-
-            std::cout << "probability: " <<  instance.getGeneralAccepEval(s) << " " << h << std::endl;
-
-            // Accept new point under this condition.
-            if(instance.getGeneralAccepEval(s) <= h){
-                for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-                    y_eval[i] = y_test[i];
-            }
-        }
-
-        // Compute leader objective from this scenario.
-        double eval_sce = 0.0;
-        for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-            eval_sce += instance.getModel()->follower_vars[i].obj_leader*y_eval[i];
-        eval += eval_sce/(double)instance.getNbValidateScenarios();
-    }
-    return eval;
-}
-
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-LeaderSolver::LeaderSolver(const Input & input, const Instance & instance, std::string name) : 
+LeaderSolver::LeaderSolver(const Input & input, Instance & instance, std::string name) : 
                                             LeaderSolver(input,instance,name,-1,new GRBEnv()){} 
 
-LeaderSolver::LeaderSolver(const Input & input, const Instance & instance, std::string name, int pr, GRBEnv *env) : 
+LeaderSolver::LeaderSolver(const Input & input, Instance & instance, std::string name, int pr, GRBEnv *env) : 
                                 AbstractLeaderSolver(input,instance,name,env), pr(pr), model(new GRBModel(*env)) {
     // Create leader problem
     params();
@@ -198,7 +157,7 @@ void LeaderSolver::params(){
     model->set(GRB_DoubleParam_TimeLimit, input.getTimeLimit());
     model->set(GRB_DoubleParam_MIPGap, 1e-4);
     model->set(GRB_DoubleParam_IntFeasTol, 1e-5);
-    model->set(GRB_DoubleParam_FeasibilityTol, 1e-6);
+    model->set(GRB_DoubleParam_FeasibilityTol, 1e-9);
     if(input.getVerbose() < 1) model->set(GRB_IntParam_OutputFlag, 0);
     else model->set(GRB_IntParam_OutputFlag, 1);
 }
@@ -337,7 +296,7 @@ std::string LeaderSolver::writeHead() const {
 
 ///////////////////////////////////////////////////////////////////////////////////
 
-SAALeaderSolver::SAALeaderSolver(const Input & input, const Instance & instance, std::string name) : 
+SAALeaderSolver::SAALeaderSolver(const Input & input, Instance & instance, std::string name) : 
                                     AbstractLeaderSolver(input,instance,name,new GRBEnv()) {
     var_lb = 0.0;
     var_ub = 0.0;

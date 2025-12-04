@@ -1,7 +1,7 @@
 #include "depgeneralfollower.hpp"
 #include "../../leadersolver/leadersolver.hpp"
 
-DepGeneralFollowerSolver::DepGeneralFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader, int pr) :
+DepGeneralFollowerSolver::DepGeneralFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader, int pr) :
                                     AbstractFollowerSolver(input,instance,leader), pr(pr) { 
     // Initialize pointers to NULL.
     y.resize(instance.getNbScenarios(),NULL);
@@ -49,7 +49,7 @@ void DepGeneralFollowerSolver::defineMCMCVars(){
         q = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_BINARY);
 
         // Interval variables.
-        w = leader->getGRBModel()->addVars(instance.getGeneralNbIntervals(),GRB_BINARY);
+        w = leader->getGRBModel()->addVars(input.getNbIntervalsGeneral(),GRB_BINARY);
     }
 }
 
@@ -78,16 +78,16 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
         // Define interval for probability functions according to follower optimal value.
         GRBVar f_prop = leader->getGRBModel()->addVar(0.0,1.0,0.0,GRB_CONTINUOUS);
         leader->getGRBModel()->addConstr(f_prop == (instance.getModel()->follower_ub - fs)/(instance.getModel()->follower_ub - instance.getModel()->follower_lb)); 
-        for(int k = 0; k < instance.getGeneralNbIntervals(); ++k){
-            leader->getGRBModel()->addConstr(f_prop >= (instance.getGeneralIntervalValue(k) + input.getEpsBigM())*w[k]);
-            leader->getGRBModel()->addConstr(f_prop <= 1.0 + (instance.getGeneralIntervalValue(k+1) - 1.0)*w[k]); 
+        for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
+            leader->getGRBModel()->addConstr(f_prop >= (input.getGeneralIntervalValue(k) + input.getEpsBigM())*w[k]);
+            leader->getGRBModel()->addConstr(f_prop <= 1.0 + (input.getGeneralIntervalValue(k+1) - 1.0)*w[k]); 
 
-            leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, f_prop >= instance.getGeneralIntervalValue(k) + input.getEpsBigM());
-            leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, f_prop <= instance.getGeneralIntervalValue(k+1));
+            leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, f_prop >= input.getGeneralIntervalValue(k) + input.getEpsBigM());
+            leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, f_prop <= input.getGeneralIntervalValue(k+1));
         }
 
         GRBLinExpr sum_expr = 0;
-        for(int k = 0; k < instance.getGeneralNbIntervals(); ++k) sum_expr += w[k];
+        for(int k = 0; k < input.getNbIntervalsGeneral(); ++k) sum_expr += w[k];
         leader->getGRBModel()->addConstr(sum_expr == 1.0);
         
         // Define acceptance constraints.
@@ -109,8 +109,8 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
                 double r = instance.getGeneralAccep(pr,s);
 
                 GRBLinExpr expr = 0;
-                for(int k = 0; k < instance.getGeneralNbIntervals(); ++k)
-                    expr += (((r - 1.0)*instance.getGeneralRefProbab())/(input.getScalingGeneral()*instance.getGeneralIntervalCoeff(k)))*w[k];
+                for(int k = 0; k < input.getNbIntervalsGeneral(); ++k)
+                    expr += (((r - 1.0)*instance.getGeneralRefProbab())/(input.getScalingGeneral()*input.getGeneralIntervalCoeff(k)))*w[k];
 
                 for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
                     BilevelVariable var = instance.getModel()->follower_vars[i];
@@ -136,8 +136,8 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
                 double r = instance.getGeneralAccep(pr,s);
 
                 GRBLinExpr expr = 0;
-                for(int k = 0; k < instance.getGeneralNbIntervals(); ++k)
-                    expr += ((std::log(r))/(input.getScalingGeneral()*instance.getGeneralIntervalCoeff(k)))*w[k];
+                for(int k = 0; k < input.getNbIntervalsGeneral(); ++k)
+                    expr += ((std::log(r))/(input.getScalingGeneral()*input.getGeneralIntervalCoeff(k)))*w[k];
                 expr -= instance.getGeneralCoeffAlphaObj(pr,s)*alpha[s];
 
                 double bigm_ub = std::log(r) - std::log(instance.getGeneralMinProbab()) + std::log(instance.getGeneralMaxProbab());
@@ -216,8 +216,14 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                     else expr += var.obj_follower*y[s-1][i];
                 }
                 expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_min[s];
-                leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
-                leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+
+                if(input.isNearOptMult() == true){
+                    leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                    leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                }else{
+                    leader->getGRBModel()->addConstr(expr <= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                    leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[j], 1, expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                }
             }
         }
         
@@ -308,8 +314,14 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                     else expr += var.obj_follower*y[s-1][i];
                 }
                 expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_max[s];
-                leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
-                leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+
+                if(input.isNearOptMult() == true){
+                    leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                    leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                }else{
+                    leader->getGRBModel()->addConstr(expr <= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                    leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[j], 1, expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                }
             }
         }
 
@@ -425,7 +437,11 @@ void DepGeneralFollowerSolver::defineAlphaPrimalConstrs(std::vector<GRBVar*> & s
                     else expr += var.obj_follower*y[s-1][i];
                 }
                 expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_min[s];
-                leader->getGRBModel()->addConstr(expr + slacks[s][j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                if(input.isNearOptMult() == true){
+                    leader->getGRBModel()->addConstr(expr + slacks[s][j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                }else{
+                    leader->getGRBModel()->addConstr(expr + slacks[s][j] == fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                }
             }
         }
 
@@ -459,7 +475,11 @@ void DepGeneralFollowerSolver::defineAlphaPrimalConstrs(std::vector<GRBVar*> & s
                     else expr += var.obj_follower*y[s-1][i];
                 }
                 expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_max[s];
-                leader->getGRBModel()->addConstr(expr + slacks[s][instance.getGeneralNbConstrsAlpha(pr,s,0)+j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                if(input.isNearOptMult() == true){
+                    leader->getGRBModel()->addConstr(expr + slacks[s][instance.getGeneralNbConstrsAlpha(pr,s,0)+j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                }else{
+                    leader->getGRBModel()->addConstr(expr + slacks[s][instance.getGeneralNbConstrsAlpha(pr,s,0)+j] == fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                }
             }
         }
     }
@@ -639,57 +659,12 @@ void DepGeneralFollowerSolver::defineAlphaCompConstrs(std::vector<GRBVar*> & sla
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
 double DepGeneralFollowerSolver::evaluate(){
-    // Initialize y_eval and y_test.
-    std::vector<double> y_eval(yi_, yi_ + instance.getModel()->nb_follower_vars);
-    std::vector<double> y_test(yi_, yi_ + instance.getModel()->nb_follower_vars);
-
-    // Initialize evaluation values.
-    eval_avg = 0.0;
-    eval_sce.resize(instance.getNbValidateScenarios(),0.0);
-
-    for(int s = 0; s < instance.getNbValidateScenarios(); ++s){
-        // Computing alpha_min.
-        double eval_alpha_min = instance.defineEvalMinStep(s,leader->getX_(),y_eval,fs_);
-        
-        // Computing alpha_max.
-        double eval_alpha_max = instance.defineEvalMaxStep(s,leader->getX_(),y_eval,fs_);
-        
-        // Computing alpha.
-        double tau = instance.getGeneralStepEval(s);
-        double eval_alpha = (1.0-tau)*eval_alpha_min + tau*eval_alpha_max;
-
-        if(input.getTypeDepGeneral() == Input::TypesDepGeneral::Neutral){
-            // New point alwayi accepted.
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-                y_eval[i] = y_eval[i] + eval_alpha*instance.getGeneralDirectionEval(s,i);
-        }
-        else {
-            // Compute possible new point.
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-                y_test[i] = y_eval[i] + eval_alpha*instance.getGeneralDirectionEval(s,i);
-
-            // Compute probability to accept new point.
-            double h = instance.getDepGeneralProbab(fs_,leader->getX_(),y_test)/instance.getDepGeneralProbab(fs_,leader->getX_(),y_eval);
-
-            // Accept new point under this condition.
-            if(instance.getGeneralAccepEval(s) <= h){
-                for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-                    y_eval[i] = y_test[i];
-            }
-        }
-
-        // Compute leader objective from this scenario.
-        eval_sce[s] = 0.0;
-        for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-            eval_sce[s] += instance.getModel()->follower_vars[i].obj_leader*y_eval[i];
-        eval_avg += eval_sce[s]/(double)instance.getNbValidateScenarios();
-    }
-
-    double eval = eval_avg;
+    double evaluation = 0.0;
     for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
-        eval += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
-
-    return eval;
+        evaluation += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
+    double eval, var_eval, f_eval, f_var_eval;
+    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,leader->getX_(),yi_,fs_,input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+    return (evaluation + eval);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

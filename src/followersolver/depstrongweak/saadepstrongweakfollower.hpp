@@ -21,7 +21,7 @@ class SAADepStrWkFollowerSolver : public AbstractFollowerSolver {
         void defineLeaderObj();
 
     public:
-        SAADepStrWkFollowerSolver(const Input & input,const Instance & instance, LeaderSolver *leader, int pr) :
+        SAADepStrWkFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader, int pr) :
                                 AbstractFollowerSolver(input,instance,leader), pr(pr) { create(); }
         
         ~SAADepStrWkFollowerSolver() { delete[] z; }

@@ -12,7 +12,7 @@ class AbstractFollowerSolver;
 class AbstractLeaderSolver {
     protected:
         const Input & input;
-        const Instance & instance;
+        Instance & instance;
 
         std::string name;
 
@@ -26,11 +26,8 @@ class AbstractLeaderSolver {
         int nb_sol;
         Status status;
 
-        // Method to compute evaluation problem.
-        double computeGeneralEval(Input::TypesDepGeneral, int, double) const;
-
     public:
-        AbstractLeaderSolver(const Input & input,const Instance & instance,std::string name, GRBEnv * env) : input(input), instance(instance), name(name), env(env) {
+        AbstractLeaderSolver(const Input & input, Instance & instance,std::string name, GRBEnv * env) : input(input), instance(instance), name(name), env(env) {
             lb = -std::numeric_limits<double>::infinity();
             ub = std::numeric_limits<double>::infinity();
             gap = 1.0;
@@ -84,8 +81,8 @@ class LeaderSolver : public AbstractLeaderSolver {
         void create();
 
     public:
-        LeaderSolver(const Input &, const Instance &, std::string);
-        LeaderSolver(const Input &, const Instance &, std::string, int, GRBEnv *);
+        LeaderSolver(const Input &, Instance &, std::string);
+        LeaderSolver(const Input &, Instance &, std::string, int, GRBEnv *);
 
         ~LeaderSolver();
 
@@ -131,7 +128,7 @@ class SAALeaderSolver : public AbstractLeaderSolver {
         void testProblem(int);
 
     public:
-        SAALeaderSolver(const Input &, const Instance &, std::string);
+        SAALeaderSolver(const Input &, Instance &, std::string);
 
         ~SAALeaderSolver();
 

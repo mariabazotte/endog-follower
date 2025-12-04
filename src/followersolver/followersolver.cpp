@@ -279,7 +279,10 @@ void AbstractFollowerSolver::defineFollowerNearOptimalObj(GRBVar & f_eps, GRBVar
         expr += var.obj_follower*y_eps[i];
     }
     leader->getGRBModel()->addConstr(f_eps == expr, "Follower_Eps_Objective" + v);
-    leader->getGRBModel()->addConstr(expr + slack_eps == ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub) ,"Constr_Follower_Eps_Objective" + v);
+    if(input.isNearOptMult() == true)
+        leader->getGRBModel()->addConstr(expr + slack_eps == ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub) ,"Constr_Follower_Eps_Objective" + v);
+    else
+        leader->getGRBModel()->addConstr(expr + slack_eps == fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) ,"Constr_Follower_Eps_Objective" + v); 
 }
 
 void AbstractFollowerSolver::defineLeaderObj(GRBVar & F, GRBVar * & y, std::string v){
@@ -463,8 +466,8 @@ void AbstractFollowerSolver::upd_solution(){
             fw_eps_ = fw_eps.get(GRB_DoubleAttr_X);
             std::cout << "fs: " << fs_eps_ << " fw: " << fw_eps_ << std::endl;
 
-            double obj_follower_pes = 0.0;
-            double obj_follower_opt = 0.0;
+            long double obj_follower_pes = 0.0;
+            long double obj_follower_opt = 0.0;
             for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
                 std::cout << ys_[i] << " " << ys_eps_[i] << " " << yw_[i] << std::endl;
                 BilevelVariable var = instance.getModel()->follower_vars[i];
@@ -536,10 +539,14 @@ void AbstractFollowerSolver::computeStrongWeakInteriorSolutions(bool compute_str
         expr += var.obj_follower*y_eval[i];
     }
     model_eval->addConstr(expr == f_eval);
-    if(input.isFollowerNearOpt() == true)   
-        grb_constrs.push_back(model_eval->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*instance.getModel()->follower_ub,"Follower_Objective"));
-    else
+    if(input.isFollowerNearOpt() == true) {  
+        if(input.isNearOptMult() == true)
+            grb_constrs.push_back(model_eval->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*instance.getModel()->follower_ub,"Follower_Objective"));
+        else
+            grb_constrs.push_back(model_eval->addConstr(expr <= fs_ + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) ,"Follower_Objective"));
+    }else{
         model_eval->addConstr(expr == fs_,"Follower_Objective");
+    }
 
     // Solve optimistic problem.
     if(compute_str == true){
@@ -598,13 +605,28 @@ void AbstractFollowerSolver::computeStrongWeakInteriorSolutions(bool compute_str
         for(int c = 0; c < instance.getModel()->nb_follower_constrs; ++c){
             BilevelConstraint constr = instance.getModel()->follower_constrs[c];
 
-            if(constr.sense == '<') model_eval->chgCoeff(grb_constrs[c], slack, 1.0);
-            else if(constr.sense == '>') model_eval->chgCoeff(grb_constrs[c], slack, -1.0);
+            double norm = 0.0;
+            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+                BilevelVariable var = instance.getModel()->follower_vars[i];
+                norm += constr.coeffs[var.id]*constr.coeffs[var.id];
+            }
+            norm = std::sqrt(norm);
+
+            if(constr.sense == '<') model_eval->chgCoeff(grb_constrs[c], slack, 1.0*norm);
+            else if(constr.sense == '>') model_eval->chgCoeff(grb_constrs[c], slack, -1.0*norm);
         }
 
         // Include at near opt constraint.
         if(input.isFollowerNearOpt() == true) {
-            model_eval->chgCoeff(grb_constrs[instance.getModel()->nb_follower_constrs], slack, 1.0);
+
+            double norm = 0.0;
+            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+                BilevelVariable var = instance.getModel()->follower_vars[i];
+                norm += var.obj_follower*var.obj_follower;
+            }
+            norm = std::sqrt(norm);
+
+            model_eval->chgCoeff(grb_constrs[instance.getModel()->nb_follower_constrs], slack, 1.0*norm);
         }
 
         // Include lb and ub constraints with slack.
@@ -620,6 +642,8 @@ void AbstractFollowerSolver::computeStrongWeakInteriorSolutions(bool compute_str
         model_eval->update();
         model_eval->optimize();
 
+        // model_eval->write("slack.lp");
+
         Status status_eval = statusFromGurobi(model_eval->get(GRB_IntAttr_Status));
         if(status_eval == Status::Optimal){
             std::cout << "slack max: " << model_eval->get(GRB_DoubleAttr_ObjVal) << std::endl;
@@ -627,8 +651,14 @@ void AbstractFollowerSolver::computeStrongWeakInteriorSolutions(bool compute_str
             if(yi_) delete[] yi_;
             yi_ = model_eval->get(GRB_DoubleAttr_X,y_eval,instance.getModel()->nb_follower_vars);
 
+            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+                std::cout << yi_[i] << std::endl;
+            }
+
             // if(input.isFollowerNearOpt() == true) fw_eps_ = f_eval.get(GRB_DoubleAttr_X);
         }
+
+
     }
 }
 
