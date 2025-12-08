@@ -13,9 +13,11 @@ class Data():
         # Description of tar file containing instances.
         self.name_tar_file = "BOBILib/general-bilevel.tar.gz"
         self.folders_to_read = ["general-bilevel/pure-integer/denegre/",\
-                                "general-bilevel/pure-integer/zhang/"] 
+                                "general-bilevel/pure-integer/zhang/",\
+                                "general-bilevel/mixed-integer/xuwang/"] 
         self.init_name_instance = {"general-bilevel/pure-integer/denegre/": "denegre",\
-                                   "general-bilevel/pure-integer/zhang/": "zhang" } 
+                                   "general-bilevel/pure-integer/zhang/": "zhang",\
+                                   "general-bilevel/mixed-integer/xuwang/": "xuwang" } 
 
         # Reading instances at defined folders.
         with tarfile.open(self.name_tar_file, "r:gz") as tar:
@@ -216,11 +218,11 @@ class Data():
         
         for cname, cinfo in leader_constrs.items():
             if cinfo["sense"] == "<":
-                flb_model.addConstr(gp.quicksum(cinfo["coeffs"][vname]*x[vname] for vname in leader_vars.keys()) <= cinfo["rhs"], cname)
+                flb_model.addConstr(gp.quicksum(cinfo["coeffs"].get(vname,0.0)*x[vname] for vname in leader_vars.keys()) <= cinfo["rhs"], cname)
             elif cinfo["sense"] == ">":
-                flb_model.addConstr(gp.quicksum(cinfo["coeffs"][vname]*x[vname] for vname in leader_vars.keys()) >= cinfo["rhs"], cname)
+                flb_model.addConstr(gp.quicksum(cinfo["coeffs"].get(vname,0.0)*x[vname] for vname in leader_vars.keys()) >= cinfo["rhs"], cname)
             elif cinfo["sense"] == "=":
-                flb_model.addConstr(gp.quicksum(cinfo["coeffs"][vname]*x[vname] for vname in leader_vars.keys()) == cinfo["rhs"], cname)
+                flb_model.addConstr(gp.quicksum(cinfo["coeffs"].get(vname,0.0)*x[vname] for vname in leader_vars.keys()) == cinfo["rhs"], cname)
 
         for cname, cinfo in follower_constrs.items():
             if cinfo["sense"] == "<":
@@ -355,7 +357,7 @@ class Data():
         
         return follower_ub
 
-    ''' Compute any lower bound on leader problem from current instance. Assuming is a minimization problem. '''
+    ''' Compute any lower bound on leader problem (considering follower variable only on the objective) from current instance. Assuming is a minimization problem. '''
     def getLeaderLowerBound(self,leader_vars,follower_vars,leader_constrs,follower_constrs):
         # Solve gurobi model to obtain lower bound on leader objective.
         # Relaxing optimality constraint on follower problem and minimizing it.
@@ -367,7 +369,8 @@ class Data():
         x = llb_model.addVars([name for name, _ in leader_vars.items()],
                     lb=[info["lb"] for _, info in leader_vars.items()],
                     ub=[info["ub"] for _, info in leader_vars.items()],
-                    obj=[info["obj_leader"] for _, info in leader_vars.items()],
+                    # obj=[info["obj_leader"] for _, info in leader_vars.items()],
+                    obj=[0.0 for _, info in leader_vars.items()],
                     vtype=[info["type"] for _, info in leader_vars.items()],
                     name=[name for name, _ in leader_vars.items()])
 
@@ -407,7 +410,7 @@ class Data():
         
         return leader_lb 
 
-    ''' Compute any upper bound on leader problem from current instance. Assuming is a minimization problem. '''
+    ''' Compute any upper bound on leader problem (considering follower variable only on the objective) from current instance. Assuming is a minimization problem. '''
     def getLeaderUpperBound(self,leader_vars,follower_vars,leader_constrs,follower_constrs):
         # Solve gurobi model to obtain upper bound on leader objective.
         # Relaxing optimality constraint on follower problem and maximixing leader objective.
@@ -419,7 +422,8 @@ class Data():
         x = lub_model.addVars([name for name, _ in leader_vars.items()],
                     lb=[info["lb"] for _, info in leader_vars.items()],
                     ub=[info["ub"] for _, info in leader_vars.items()],
-                    obj=[info["obj_leader"] for _, info in leader_vars.items()],
+                    # obj=[info["obj_leader"] for _, info in leader_vars.items()],
+                    obj=[0.0 for _, info in leader_vars.items()],
                     vtype=[info["type"] for _, info in leader_vars.items()],
                     name=[name for name, _ in leader_vars.items()])
 

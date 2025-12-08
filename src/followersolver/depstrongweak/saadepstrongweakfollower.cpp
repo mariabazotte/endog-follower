@@ -40,14 +40,15 @@ void SAADepStrWkFollowerSolver::defineLeaderObj(){
 
 }
 
-double SAADepStrWkFollowerSolver::evaluate(){
-    double beta_ = instance.getStrongWeakProbab(fs_);
-    eval_avg = (beta_*Fs_ + (1.0-beta_)*Fw_);
-
-    double eval = eval_avg;
+void SAADepStrWkFollowerSolver::evaluate(double & mean, double & variance){
+    double x_obj_leader = 0.0;
     for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
-        eval += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
-    return eval;
+        x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
+
+    double beta_ = instance.getStrongWeakProbab(fs_);
+    
+    mean = x_obj_leader + (beta_*Fs_ + (1.0-beta_)*Fw_);
+    variance = 0.0;
 }
 
 void SAADepStrWkFollowerSolver::computeStrongWeakInteriorSolutions(){

@@ -114,10 +114,10 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
 
                 for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
                     BilevelVariable var = instance.getModel()->follower_vars[i];
-                    if(s == 0) expr -= (1.0 - r)*var.obj_follower*yi[i];    
-                    else expr -= (1.0 - r)*var.obj_follower*y[s-1][i];
+                    if(s == 0) expr -= (1.0 - r)*var.obj_leader*yi[i];    
+                    else expr -= (1.0 - r)*var.obj_leader*y[s-1][i];
                 }
-                expr -= instance.getGeneralCoeffAlphaObj(pr,s)*alpha[s];
+                expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*alpha[s];
                 expr -= instance.getRefLeaderObj()*(r - 1.0);
 
                 double bigm_ub = r*instance.getGeneralMaxProbab() - instance.getGeneralMinProbab();
@@ -137,8 +137,8 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
 
                 GRBLinExpr expr = 0;
                 for(int k = 0; k < input.getNbIntervalsGeneral(); ++k)
-                    expr += ((std::log(r))/(input.getScalingGeneral()*input.getGeneralIntervalCoeff(k)))*w[k];
-                expr -= instance.getGeneralCoeffAlphaObj(pr,s)*alpha[s];
+                    expr += ((std::log(r)*(instance.getModel()->leader_ub - instance.getModel()->leader_lb))/(input.getScalingGeneral()*input.getGeneralIntervalCoeff(k)))*w[k];
+                expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*alpha[s];
 
                 double bigm_ub = std::log(r) - std::log(instance.getGeneralMinProbab()) + std::log(instance.getGeneralMaxProbab());
                 double bigm_lb = std::log(r) - std::log(instance.getGeneralMaxProbab()) + std::log(instance.getGeneralMinProbab());
@@ -154,9 +154,13 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
 }
 
 void DepGeneralFollowerSolver::defineMCMCObj(){
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-            y[s][i].set(GRB_DoubleAttr_Obj,(instance.getModel()->follower_vars[i].obj_leader/(double)instance.getNbScenarios()));
+    double nb_scenarios = instance.getNbScenarios()/instance.getNbThinning();
+    for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+        BilevelVariable var = instance.getModel()->follower_vars[i];
+        for(int s = 0; s < instance.getNbScenarios(); ++s){
+            if(instance.chosenScenario(s) == true){
+                y[s][i].set(GRB_DoubleAttr_Obj,var.obj_leader/nb_scenarios);
+            }
         }
     }
 }
@@ -215,7 +219,7 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                     if(s == 0) expr += var.obj_follower*yi[i];    
                     else expr += var.obj_follower*y[s-1][i];
                 }
-                expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_min[s];
+                expr += instance.getGeneralCoeffAlphaObjFollower(pr,s)*alpha_min[s];
 
                 if(input.isNearOptMult() == true){
                     leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
@@ -313,7 +317,7 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                     if(s == 0) expr += var.obj_follower*yi[i];    
                     else expr += var.obj_follower*y[s-1][i];
                 }
-                expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_max[s];
+                expr += instance.getGeneralCoeffAlphaObjFollower(pr,s)*alpha_max[s];
 
                 if(input.isNearOptMult() == true){
                     leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
@@ -436,7 +440,7 @@ void DepGeneralFollowerSolver::defineAlphaPrimalConstrs(std::vector<GRBVar*> & s
                     if(s == 0) expr += var.obj_follower*yi[i];    
                     else expr += var.obj_follower*y[s-1][i];
                 }
-                expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_min[s];
+                expr += instance.getGeneralCoeffAlphaObjFollower(pr,s)*alpha_min[s];
                 if(input.isNearOptMult() == true){
                     leader->getGRBModel()->addConstr(expr + slacks[s][j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
                 }else{
@@ -474,7 +478,7 @@ void DepGeneralFollowerSolver::defineAlphaPrimalConstrs(std::vector<GRBVar*> & s
                     if(s == 0) expr += var.obj_follower*yi[i];    
                     else expr += var.obj_follower*y[s-1][i];
                 }
-                expr += instance.getGeneralCoeffAlphaObj(pr,s)*alpha_max[s];
+                expr += instance.getGeneralCoeffAlphaObjFollower(pr,s)*alpha_max[s];
                 if(input.isNearOptMult() == true){
                     leader->getGRBModel()->addConstr(expr + slacks[s][instance.getGeneralNbConstrsAlpha(pr,s,0)+j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
                 }else{
@@ -658,13 +662,16 @@ void DepGeneralFollowerSolver::defineAlphaCompConstrs(std::vector<GRBVar*> & sla
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-double DepGeneralFollowerSolver::evaluate(){
-    double evaluation = 0.0;
+void DepGeneralFollowerSolver::evaluate(double & mean, double & variance){
+    double x_obj_leader = 0.0;
     for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
-        evaluation += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
-    double eval, var_eval, f_eval, f_var_eval;
-    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,leader->getX_(),yi_,fs_,input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
-    return (evaluation + eval);
+        x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
+
+    double eval, var_eval, f_eval, f_var_eval, ess, rhat;
+    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,leader->getX_(),yi_,Fs_,Fw_,fs_,input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+    
+    mean = x_obj_leader + eval;
+    variance = var_eval;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

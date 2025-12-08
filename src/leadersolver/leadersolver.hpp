@@ -26,6 +26,10 @@ class AbstractLeaderSolver {
         int nb_sol;
         Status status;
 
+        void writeCompFixStrongWeak(std::string &, double, double, double, double) const;
+        void writeCompDepStrongWeak(std::string &, Input::TypesDepStrongWeak, double, double, double, double) const;
+        void writeCompDepGeneral(std::string &, Input::TypesDepGeneral, int, double, double, double, double, double, double, double, double) const;
+
     public:
         AbstractLeaderSolver(const Input & input, Instance & instance,std::string name, GRBEnv * env) : input(input), instance(instance), name(name), env(env) {
             lb = -std::numeric_limits<double>::infinity();

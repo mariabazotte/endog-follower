@@ -22,7 +22,7 @@ class FixStrongWeakFollowerSolver : public AbstractFollowerSolver {
 
         ~FixStrongWeakFollowerSolver() {}
 
-        double evaluate();
+        void evaluate(double &, double &);
 
         void computeStrongWeakInteriorSolutions();
 };

@@ -5,6 +5,8 @@ void Input::defaultParams(){
     is_follower_near_optimal = false; // Follower is optimal
     eps_near_optimal = 0.05;
     is_near_optimal_mult = true;
+    
+    // Parameters for Fixed Strong-Weak
     fix_cooperation_level = 0.5;
 
     // Parameters for Type of Decision-Dependent Stong Weak case
@@ -32,7 +34,6 @@ void Input::defaultParams(){
     // General parameters
     time_limit = 3600;
     nb_threads = 1;
-    seed = 0;
     verbose = 0;
     eps_bigm = 0.001;
                   
@@ -41,14 +42,19 @@ void Input::defaultParams(){
     nbscenariosSAA = 100;
     nbthinningSAA = 5;
 
-    nbvalidateproblems = 1;
+    nbvalidateproblems = 5;
     nbvalidatescenarios = 10000;
     nbvalidatethinning = 50;
+
+    coordinate_har = false;
 }
 
 Input::Input(int argc, char* argv[]){
     defaultParams();
     int mandatory = 0;
+    bool mandatory_fix_strwk = false;
+    bool mandatory_dep_strwk = false;
+    bool mandatory_dep_gen = false;
     for (int i = 1; i < argc; i += 2){
         if(std::string(argv[i]) == "-instancefile"){ // Mandatory parameters
             instance_file = argv[i+1];
@@ -59,19 +65,21 @@ Input::Input(int argc, char* argv[]){
             mandatory += 1;
         }else if(std::string(argv[i]) == "-fix_strwk"){
             fix_cooperation_level = std::stod(argv[i+1]);  
-            if(follower_behavior == FollowerBehavior::FixStrongWeak) mandatory += 1;
+            mandatory_fix_strwk = true;
         }else if(std::string(argv[i]) == "-dep_strwk"){
             int_type_dep_strongweak = std::stoi(argv[i+1]);
             type_dep_strongweak = TypesDepStrongWeak(int_type_dep_strongweak);
-            if(follower_behavior == FollowerBehavior::DepStrongWeak) mandatory += 1;
+            mandatory_dep_strwk = true;
         }else if(std::string(argv[i]) == "-dep_gen"){
             int_type_dep_general = std::stoi(argv[i+1]);
             type_dep_general = TypesDepGeneral(int_type_dep_general);
-            if(follower_behavior == FollowerBehavior::DepGeneral) mandatory += 1;
+            mandatory_dep_gen = true;
         }else if(std::string(argv[i]) == "-near_opt")  // Optional :: Instance and Behavior
             is_follower_near_optimal = std::stoi(argv[i+1]);  
         else if(std::string(argv[i]) == "-eps_near_opt")  
             eps_near_optimal = std::stod(argv[i+1]); 
+        else if(std::string(argv[i]) == "-mult_near_opt")  
+            is_near_optimal_mult = std::stoi(argv[i+1]); 
         else if(std::string(argv[i]) == "-thr_param")  // Optional :: Strong Weak Decision-Dependent parameters
             threshold_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-str_param")
@@ -102,8 +110,6 @@ Input::Input(int argc, char* argv[]){
             time_limit = std::stod(argv[i+1]);   
         else if(std::string(argv[i]) == "-nbthreads") 
             nb_threads = std::stoi(argv[i+1]);
-        else if(std::string(argv[i]) == "-seed") 
-            seed = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-verbose")
             verbose = std::stoi(argv[i+1]);
         else if(std::string(argv[i]) == "-nbproblemsSAA") // Optional :: SAA problem and validation
@@ -118,16 +124,33 @@ Input::Input(int argc, char* argv[]){
             nbvalidatescenarios = std::stoi(argv[i+1]); 
         else if(std::string(argv[i]) == "-nbvalidatethinning")
             nbvalidatethinning = std::stoi(argv[i+1]);
+        else if(std::string(argv[i]) == "-coord_har")
+            coordinate_har = std::stoi(argv[i+1]);
         else{
             std::cerr << "ERROR: Argument '" << argv[i] << "' not defined." << std::endl;
             throw std::runtime_error(std::string("Incorrect line of command"));
         }
     }
     testParameters();
-    if(mandatory < 3){
+    if(mandatory != 2){
         std::cerr << "ERROR: Not all mandatory arguments were defined." << std::endl;
         std::cerr << "You need to define: -instancefile -follower and -fix_coop_strweak (if -follower = 0), -dep_coop_strweak (if -follower = 1), or -dep_coop_gen (if -follower = 2)." << std::endl;
         throw std::runtime_error(std::string("Incorrect line of command"));
+    }
+    if(follower_behavior == Input::FollowerBehavior::FixStrongWeak && mandatory_fix_strwk == false){
+        std::cerr << "ERROR: Not all mandatory arguments were defined." << std::endl;
+        std::cerr << "You need to define: -fix_coop_strweak when -follower = 0." << std::endl;
+        throw std::runtime_error(std::string("Incorrect line of command"));
+    }
+    if(follower_behavior == Input::FollowerBehavior::DepStrongWeak && mandatory_dep_strwk == false){
+        std::cerr << "ERROR: Not all mandatory arguments were defined." << std::endl;
+        std::cerr << "You need to define: -dep_coop_strweak when -follower = 1." << std::endl;
+        throw std::runtime_error(std::string("Incorrect line of command"));     
+    }
+    if(follower_behavior == Input::FollowerBehavior::DepGeneral && mandatory_dep_gen == false){
+        std::cerr << "ERROR: Not all mandatory arguments were defined." << std::endl;
+        std::cerr << "You need to define: -dep_coop_gen when -follower = 2." << std::endl;
+        throw std::runtime_error(std::string("Incorrect line of command"));  
     }
     defineSolutionFile();
 }
@@ -140,8 +163,9 @@ void Input::defineSolutionFile(){
     
     solution_file = "../results/";
     
+    // Configuration corresponding to follower behavior.
     if(follower_behavior == Input::FollowerBehavior::FixStrongWeak){
-        solution_file += std::string("fixstrongweak/") + std::string("param") + doubleToString(fix_cooperation_level) + "_";
+        solution_file += "fixstrongweak/param" + doubleToString(fix_cooperation_level) + "_";
     }
     if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
         solution_file += "depstrongweak/";
@@ -152,38 +176,64 @@ void Input::defineSolutionFile(){
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Proportional)
             solution_file += "proportional/";
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Threshold)
-            solution_file += std::string("threshold/") + std::string("param") + doubleToString(threshold_param) + "_";
+            solution_file += "threshold/param" + doubleToString(threshold_param) + "_";
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Strong)
-            solution_file += std::string("strong/") + std::string("param") + doubleToString(strong_param) + "_";
+            solution_file += "strong/param" + doubleToString(strong_param) + "_";
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Fragile)
-            solution_file += std::string("fragile/") + std::string("param") + doubleToString(fragile_param) + "_";
+            solution_file += "fragile/param" + doubleToString(fragile_param) + "_";
     }
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         solution_file += "depgeneral/";
         if(type_dep_general == Input::TypesDepGeneral::Neutral)
-            solution_file += std::string("neutral/") + std::string("explstep") + std::to_string(gen_step_explicit) + "_";
+            solution_file += "neutral/explstep" + std::to_string(gen_step_explicit) + "_";
         if(type_dep_general == Input::TypesDepGeneral::GenProportional)
-            solution_file += std::string("proportional/") + std::string("explstep") + std::to_string(gen_step_explicit) + std::string("_nbintv") + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+            solution_file += "proportional/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
         if(type_dep_general == Input::TypesDepGeneral::StrongFragile)
-            solution_file += std::string("strongfragile/") + std::string("explstep") + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+            solution_file += "strongfragile/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
     }
 
+    // Configuration corresponding to follower optimiality.
     solution_file += "nearopt" + std::to_string(is_follower_near_optimal);
-    if(is_follower_near_optimal == true) solution_file += "_epsnearopt" + doubleToString(eps_near_optimal);
+    if(is_follower_near_optimal == true) {
+        solution_file += "_epsnearopt" + doubleToString(eps_near_optimal);
+        solution_file += "_multnearopt" + std::to_string(is_near_optimal_mult);
+    }
 
-    // Configuration corresponding to instance
-    int seed_aux = seed;
-    solution_file += "_" + instfile.substr(0, instfile.size()-4) + "_seed" + std::to_string(seed_aux);
+    // Configuration corresponding to instance.
+    solution_file += "_" + instfile.substr(0, instfile.size()-4);
     
-    // Configuration corresponding to SAA 
-    if(solver_approach == Input::SolverApproach::DEP) solution_file += "_nbval" + std::to_string(nbvalidatescenarios);
-    else solution_file += "_nbpr" + std::to_string(nbproblemsSAA) + "_nbsc" + std::to_string(nbscenariosSAA) + "_nbval" + std::to_string(nbvalidatescenarios); 
-    
-    // Configuration corresponding to general parameters
+    // Configuration corresponding to SAA method: SAA problem and evaluation problem.
+    if(solver_approach != Input::SolverApproach::DEP) {   
+        solution_file += "_nbsaapr" + std::to_string(nbproblemsSAA) + 
+                         "_nbsaasc" + std::to_string(nbscenariosSAA) + 
+                         "_nbsaath" + std::to_string(nbthinningSAA);
+
+        if(follower_behavior == Input::FollowerBehavior::DepGeneral) {
+            // Decision dependent general case is evaluated with markov
+            // chain monte carlo hit and run. Strong-weak cases are evaluated
+            // by enumerating the two endogenous scenarios, no need for MCMC.
+            solution_file += "_nbvalpr" + std::to_string(nbvalidateproblems) + 
+                             "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
+                             "_nbvalth" + std::to_string(nbvalidatethinning);
+            solution_file += "_coordhar" + std::to_string(coordinate_har);
+        }
+    }
+
+    // Configuration corresponding to general parameters.
     int aux_time = time_limit;
     solution_file +=  "_time" + std::to_string(aux_time);
-    
-    comparison_file = solution_file + "_comparison.csv";
+
+    // Initializing comparison file with information on model solved to obtain leader decision. 
+    comparison_file = solution_file;
+
+    // Configuration to evaluate other configurations with the decision obtained
+    // by the considered problem.
+    comparison_file += "_nbvalpr" + std::to_string(nbvalidateproblems) + 
+                       "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
+                       "_nbvalth" + std::to_string(nbvalidatethinning);
+    comparison_file += "_coordhar" + std::to_string(coordinate_har);
+
+    comparison_file += "_comparison.csv";
     solution_file += "_solution.csv"; 
     
     // Open files
@@ -200,10 +250,15 @@ std::string Input::doubleToString(double param){
 }
 
 void Input::testParameters(){
-
     if(int_follower_behavior > 2){
         throw std::runtime_error(std::string("Wrong follower behavior value."));
         exit(0);
+    }
+    if(follower_behavior == Input::FollowerBehavior::FixStrongWeak){
+        if(fix_cooperation_level <= (-1e-8) || fix_cooperation_level >= (1.0 + 1e-8)){
+            throw std::runtime_error(std::string("Wrong value for fixed cooperation parameter: it should be defined in the interval [0.0,1.0]"));
+            exit(0);
+        }
     }
     if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
         if(int_type_dep_strongweak > 3){
@@ -226,7 +281,14 @@ void Input::testParameters(){
         int_solver_approach = 0;
         solver_approach = SolverApproach(int_solver_approach);
         std::cout << " Decision-dependent general type always solved with TR-SAA approach." << std::endl;
+    }else if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
+        if(solver_approach == Input::SolverApproach::TR_SAA){
+            // Thinning always 1 in this case. We use monte carlo sampling in this case, not 
+            // markov chain monte carlo.
+            nbthinningSAA = 1; 
+        }
     }
+
     if(int_solver_approach > 1){
         throw std::runtime_error(std::string("Wrong solver approach value."));
         exit(0);
@@ -236,24 +298,25 @@ void Input::testParameters(){
     if(solver_approach == Input::SolverApproach::DEP){ 
         nbproblemsSAA = 0;
         nbscenariosSAA = 0;
+        nbthinningSAA = 0;
     }
 
     // Verify parameters.
     if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Threshold){
-            if(threshold_param <= 0.0){
+            if(threshold_param <= -1e-8){
                 std::cout << "Threshold parameter must be > 0. Setting parameter to default value 2.0." << std::endl;
                 threshold_param = 2.0;
             }
         }
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Strong){
-            if(strong_param <= 0.0){
+            if(strong_param <= -1e-8){
                 std::cout << "Strong parameter must be > 0. Setting parameter to default value 3.0." << std::endl;
                 strong_param = 3.0;
             }
         }
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Fragile){
-            if(fragile_param <= 0.0){
+            if(fragile_param <= -1e-8){
                 std::cout << "Fragile parameter must be > 0. Setting parameter to default value 3.0." << std::endl;
                 fragile_param = 3.0;
             }
@@ -261,14 +324,13 @@ void Input::testParameters(){
     }
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         if(type_dep_general != Input::TypesDepGeneral::Neutral){
-            if(gen_scaling_param <= 0.0){
+            if(gen_scaling_param <= -1e-8){
                 std::cout << "Scaling parameter must be > 0. Setting parameter to default value 2.0." << std::endl;
                 gen_scaling_param = 2.0;
             }
-            if(gen_nb_intervals <= 0){
+            if(gen_nb_intervals <= -1e-8){
                 std::cout << "Nb. intervals parameter must be > 0. Setting parameter to default value 4." << std::endl;
                 gen_nb_intervals = 4;
-
             }
         }
     }
@@ -302,19 +364,27 @@ void Input::display(){
         }
     }std::cout << "--------------------------------------" << std::endl;
     std::cout << "NEAR OPTIMAL     :  " << is_follower_near_optimal << std::endl;
-    if(is_follower_near_optimal == true)
+    if(is_follower_near_optimal == true) {
         std::cout << "EPS NEAR OPTIMAL :  " << eps_near_optimal << std::endl;
+        std::cout << "MULT NEAR OPTIMAL:  " << is_near_optimal_mult << std::endl;
+    }
     std::cout << "--------------------------------------" << std::endl;
     std::cout << "SOLUTION APPROACH:  " << solver_approach << std::endl;  
     std::cout << "--------------------------------------" << std::endl;
-    std::cout << "SEED             :  " << seed << std::endl;
     std::cout << "TIME LIMIT       :  " << time_limit << std::endl;
     std::cout << "NUMBER THREADS   :  " << nb_threads << std::endl;
     std::cout << "VERBOSE          :  " << verbose << std::endl;
     std::cout << "--------------------------------------" << std::endl;
-    std::cout << "NB PROBLEMS      :  " << nbproblemsSAA << std::endl;
-    std::cout << "NB SCENARIOS     :  " << nbscenariosSAA << std::endl;
+    if(solver_approach == Input::SolverApproach::TR_SAA) {
+        std::cout << "NB SAA PROBLEMS  :  " << nbproblemsSAA << std::endl;
+        std::cout << "NB SAA SCENARIOS :  " << nbscenariosSAA << std::endl;
+        std::cout << "NB SAA THINNING  :  " << nbthinningSAA << std::endl;
+        std::cout << "--------------------------------------" << std::endl;
+    }
+    std::cout << "NB VAL PROBLEMS  :  " << nbvalidateproblems << std::endl;
     std::cout << "NB VAL SCENARIOS :  " << nbvalidatescenarios << std::endl;
+    std::cout << "NB VAL THINNING  :  " << nbvalidatethinning << std::endl;
+    std::cout << "COORDINATE HAR   :  " << coordinate_har << std::endl;
     std::cout << "--------------------------------------" << std::endl;
 }
 
@@ -340,11 +410,19 @@ void Input::write(std::string output){
         solFile << solver_approach << ";";
         solFile << is_follower_near_optimal << ";";
         solFile << eps_near_optimal << ";";
+        solFile << is_near_optimal_mult << ";";
         solFile << instance_file << ";";
-        solFile << seed << ";";
-        solFile << nbproblemsSAA << ";";
-        solFile << nbscenariosSAA << ";";
-        solFile << nbvalidatescenarios << ";";
+        if(solver_approach == Input::SolverApproach::TR_SAA){
+            solFile << nbproblemsSAA << ";";
+            solFile << nbscenariosSAA << ";";
+            solFile << nbthinningSAA << ";";
+            if(follower_behavior == Input::FollowerBehavior::DepGeneral){
+                solFile << nbvalidateproblems << ";";
+                solFile << nbvalidatescenarios << ";";
+                solFile << nbvalidatethinning << ";";
+                solFile << coordinate_har << ";";
+            }
+        }
         solFile << output;
         solFile << std::endl;
     }
@@ -361,10 +439,13 @@ void Input::writeHead(std::string output){
             if(type_dep_general != Input::TypesDepGeneral::Neutral)
                 solFile << "NB_INTERVALS;SCALING;";
         }
-        solFile << "SOLUTION;";
-        solFile << "NEAR_OPT;EPS_NEAR_OPT;";
-        solFile << "INSTANCE_FILE;SEED;";
-        solFile << "NB_PROBLEMS;NB_SCENARIOS;NB_TEST_SCENARIOS;";
+        solFile << "SOLUTION;NEAR_OPT;EPS_NEAR_OPT;MULT_NEAR_OPT;INSTANCE_FILE;";
+        if(solver_approach == Input::SolverApproach::TR_SAA){
+            solFile << "NB_SAA_PROBLEMS;NB_SAA_SCENARIOS;NB_SAA_THINNING;";
+            if(follower_behavior == Input::FollowerBehavior::DepGeneral){
+                solFile << "NB_VAL_PROBLEMS;NB_VAL_SCENARIOS;NB_VAL_THINNING;COORDINATE_HAR;";
+            }
+        }
         solFile << output;
         solFile << std::endl;
     }

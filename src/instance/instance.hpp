@@ -39,8 +39,7 @@ class Instance {
         double critical_tstudent;                      /* Critical value for t-student distribution. */
         double critical_normal;                        /* Critical value for normal distribution. */
 
-        double seed;                                   /* Seed for random data generation (scenarios). */
-        std::default_random_engine rd_engine;          /* Random engine for data generation (scenarios).*/ 
+        std::vector<std::mt19937> rd_engine;           /* Random engine for data generation (scenarios).*/ 
         std::uniform_real_distribution<> uniform_eps;  /* Uniform distribution for sampling scenarios. (decision-dependent strong weak) */
         std::uniform_real_distribution<> uniform;      /* Uniform distribution for sampling scenarios. (decision-dependent general step and accept random variables) */
         std::normal_distribution<> normal;             /* Normal distribution for sampling scenarios. (decision-dependent general direction random vector for full hit and run) */
@@ -74,22 +73,24 @@ class Instance {
         std::vector<std::vector<double>> step_scenarios_dep_gen;                /* step_scenarios_dep_gen[pr][s]: (tau) sample U(0,1) to define step for general case transformed scenario s of the SAA problem pr.  */
         std::vector<std::vector<double>> accep_scenarios_dep_gen;               /* accep_scenarios_dep_gen[pr][s]: (phi) sample U(0,1) to define acceptance rate for general case transformed scenario s of the SAA problem pr. */
 
-        std::vector<std::vector<double>> coeff_obj_alpha;                       /* coeff_obj_alpha[pr][s]: coefficient of the alpha variable at the follower near optimal objective value constraint at problem pr and scenario s. */
+        std::vector<std::vector<double>> coeff_obj_follower_alpha;              /* coeff_obj_follower_alpha[pr][s]: coefficient of the alpha variable at the follower near optimal objective value constraint at problem pr and scenario s. */
+        std::vector<std::vector<double>> coeff_obj_leader_alpha;                /* coeff_obj_leader_alpha[pr][s]: coefficient of the alpha variable for leader objective value constraint at problem pr and scenario s. */
         std::vector<std::vector<std::vector<double>>> coeff_alpha;              /* coeff_alpha[pr][s][c]: coefficient of the alpha variable at the follower constraint c at problem pr and scenario s. */
         std::vector<std::vector<std::vector<std::vector<int>>>> constrs_alpha;  /* constrs_alpha[pr][s][0/1]: list of follower constraint defining alpha min (0), and alpha max (1) in problem pr and scenario s. */
         std::vector<std::vector<std::vector<std::vector<int>>>> bdlbs_alpha;    /* bdlbs_alpha[pr][s][0/1]: list of lower bounds on follower variables defining alpha min (0), and alpha max (1) in problem pr and scenario s. */
         std::vector<std::vector<std::vector<std::vector<int>>>> bdubs_alpha;    /* bdubs_alpha[pr][s][0/1]: list of upper bounds on follower variables defining alpha min (0), and alpha max (1) in problem pr and scenario s. */
 
         // Evaluation scenarios for Decision-dependent general case.
-        std::vector<std::vector<double>> dir_eval_dep_gen;                      /* dir_eval_dep_gen[s]: (upsilon) direction for general case for evaluation step.  */
-        std::vector<double> step_eval_dep_gen;                                  /* step_eval_dep_gen[s]: (tau) sample U(0,1) to define step for general case for evaluation step. */
-        std::vector<double> accep_eval_dep_gen;                                 /* accep_eval_dep_gen[s]: (phi) sample U(0,1) to define acceptance rate for general case for evaluation step. */
+        std::vector<std::vector<std::vector<double>>> dir_eval_dep_gen;                      /* dir_eval_dep_gen[s]: (upsilon) direction for general case for evaluation step.  */
+        std::vector<std::vector<double>> step_eval_dep_gen;                                  /* step_eval_dep_gen[s]: (tau) sample U(0,1) to define step for general case for evaluation step. */
+        std::vector<std::vector<double>> accep_eval_dep_gen;                                 /* accep_eval_dep_gen[s]: (phi) sample U(0,1) to define acceptance rate for general case for evaluation step. */
         
-        std::vector<double> eval_coeff_obj_alpha;                               /* eval_coeff_obj_alpha[s]: */
-        std::vector<std::vector<double>> eval_coeff_alpha;                      /* eval_coeff_alpha[s][c]: */
-        std::vector<std::vector<std::vector<int>>> eval_constrs_alpha;          /* eval_constrs_alpha[s][0/1]: */
-        std::vector<std::vector<std::vector<int>>> eval_bdlbs_alpha;            /* eval_bdlbs_alpha[s][0/1]: list of lower bounds on follower variables defining alpha min (0), and alpha max (1) in scenario s of evaluation step.*/
-        std::vector<std::vector<std::vector<int>>> eval_bdubs_alpha;            /* eval_bdubs_alpha[s][0/1]: list of upper bounds on follower variables defining alpha min (0), and alpha max (1) in scenario s of evaluation step. */
+        std::vector<std::vector<double>> eval_coeff_obj_follower_alpha;                      /* eval_coeff_obj_follower_alpha[s]: coefficient alpha considering follower variables at follower objective. */
+        std::vector<std::vector<double>> eval_coeff_obj_leader_alpha;                        /* eval_coeff_obj_leader_alpha[s]: coefficient alpha considering follower variables at leader objective. */
+        std::vector<std::vector<std::vector<double>>> eval_coeff_alpha;                      /* eval_coeff_alpha[s][c]: */
+        std::vector<std::vector<std::vector<std::vector<int>>>> eval_constrs_alpha;          /* eval_constrs_alpha[s][0/1]: */
+        std::vector<std::vector<std::vector<std::vector<int>>>> eval_bdlbs_alpha;            /* eval_bdlbs_alpha[s][0/1]: list of lower bounds on follower variables defining alpha min (0), and alpha max (1) in scenario s of evaluation step.*/
+        std::vector<std::vector<std::vector<std::vector<int>>>> eval_bdubs_alpha;            /* eval_bdubs_alpha[s][0/1]: list of upper bounds on follower variables defining alpha min (0), and alpha max (1) in scenario s of evaluation step. */
 
         // Problem configurations for comparison.
         std::vector<double> fix_strwk_cg = {0.0, 0.3, 0.5, 0.7, 1.0};
@@ -110,37 +111,42 @@ class Instance {
         void nullSpaceFollowerEqConstrs(bool);                          /* Function to define null space for equality constraints of the follower problem. */
         void updInfoEvaluateDepGeneral(const double *, double);         /* Function to update sampling information when polyround_transform_specific = true. */ 
          
-        void generateScenarios();                                       /* Generate scenarios. */
-        double inverseDepStrongWeakScenario();                          /* Function to sample scenarios for decision-dependent strong weak case. */
-        void directionDepGeneralScenario(std::vector<double> & dir, bool eval = false);  /* Function to sample direction scenarios for decision-dependent general case. */
-        void directionDepGeneralScenarioEvalModify();                   /* Function to update direction samples when polyround_transform_specific = true. */ 
-        void defineGeneralStepInfo(int,                                 /* Function to define scenario step information for decision-dependent general case. */
-            std::vector<double> &, std::vector<std::vector<double>> &, 
+        void generateScenarios();                                           /* Generate scenarios. */
+        double inverseDepStrongWeakScenario(int);                           /* Function to sample scenarios for decision-dependent strong weak case. */
+        void directionDepGeneralScenario(int,std::vector<double> &, bool);  /* Function to sample direction scenarios for decision-dependent general case. */
+        void directionDepGeneralScenarioEvalModify();                       /* Function to update direction samples when polyround_transform_specific = true. */ 
+        void defineGeneralStepInfo(bool, int,                               /* Function to define scenario step information for decision-dependent general case. */
+            std::vector<double> &, std::vector<double> &,
+            std::vector<std::vector<double>> &, 
             std::vector<std::vector<std::vector<int>>> &, 
             std::vector<std::vector<std::vector<int>>> &, 
             std::vector<std::vector<std::vector<int>>> &);  
         
-        double computeFollowerObj(const double * y_) const;
+        // Getter for leader and follower objective given fixed decisions.
+        double computeFollowerObj(const double *) const;
         double computeLeaderObjLeaderVars(const double *) const;
         double computeLeaderObjFollowerVars(const double *) const;
 
         // Getter for current parameter values (F_c, pi_c, m) for evaluation general decision-dependent.
-        void computeParamsDepGeneral(double,Input::TypesDepGeneral, int, double, double &, double &, double &) const;
+        void computeParamsDepGeneral(double, double, double, Input::TypesDepGeneral, int, double, double &, double &, double &, double &) const;
         
         // Getters for current step/alpha min and max for evaluation general decision-dependent.
-        double defineEvalMinStep(int, const double *, const double *, double) const;
-        double defineEvalMaxStep(int, const double *, const double *, double) const;
+        double defineEvalMinStep(int, int, const double *, const double *, double) const;
+        double defineEvalMaxStep(int, int, const double *, const double *, double) const;
         
         // Getters for sampling current step/alpha final value for evaluation general decision-dependent.
-        double sampleEvalAlpha(int, double, double, double, double, double, double, Input::TypesDepGeneral) const;
-        double sampleEvalUniformAlpha(int, double, double) const;
-        double sampleEvalLinearAlpha(int, double, double, double, double) const;
-        double sampleEvalExponentialAlpha(int, double, double, double) const;
+        double sampleEvalAlpha(int, int, double, double, double, double, double, double, double, Input::TypesDepGeneral) const;
+        double sampleEvalUniformAlpha(int, int, double, double) const;
+        double sampleEvalLinearAlpha(int, int, double, double, double, double) const;
+        double sampleEvalExponentialAlpha(int, int, double, double, double) const;
+        
+        // Getter for decision-dependent strong-weak probability for current follower optimal objective value.
+        double getEvalDepStrongWeakProbab(double, Input::TypesDepStrongWeak, double) const;  // Return probability optimistic case for given decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
 
-        // Getter for general probability for current follower optimal objective value.
-        double getEvalDepGeneralProb(double, double, double, double, Input::TypesDepGeneral) const;
+        // Getter for decision-dependent general probability for current follower optimal objective value.
+        double getEvalDepGeneralProb(double, double, double, double, double, Input::TypesDepGeneral) const;
 
-        void performEvalMCMC(const Eigen::MatrixXd &) const;
+        // Method for general library implementation for comparison.
         void evaluateDepGeneralLibrary(const double *, double, double, double, double, double, Input::TypesDepGeneral);
 
     public:
@@ -152,10 +158,10 @@ class Instance {
         std::string getName() const { return name; }
 
         int getNbProblems() const { return nb_saa_problems; }
-        int getNbScenarios() const { return nb_saa_scenarios; }
-        int getNbValidateScenarios() const { return nb_val_scenarios; }
-        int getNbScenarios(int pr) { if(pr == nb_saa_problems) return nb_val_scenarios; 
-                                        else return nb_saa_scenarios; }
+        int getNbScenarios() const { return nb_saa_scenarios*nb_saa_thinning; }
+        int getNbThinning() const { return nb_saa_thinning; }
+        bool chosenScenario(int s) const { return ((s+1) % nb_saa_thinning == 0) ? 1 : 0; }
+        // int getNbValidateScenarios() const { return nb_val_scenarios; }
 
         double getCriticalNormal() const { return critical_normal;}
         double getCriticalTStudent() const { return critical_tstudent;}
@@ -173,7 +179,8 @@ class Instance {
         double getGeneralDirection(int pr, int s, int i) const { return dir_scenarios_dep_gen[pr][s][i]; }
         double getGeneralStep(int pr, int s) const { return step_scenarios_dep_gen[pr][s]; }
         double getGeneralAccep(int pr, int s) const { return accep_scenarios_dep_gen[pr][s]; }   
-        double getGeneralCoeffAlphaObj(int pr, int s) const { return coeff_obj_alpha[pr][s]; }
+        double getGeneralCoeffAlphaObjFollower(int pr, int s) const { return coeff_obj_follower_alpha[pr][s]; }
+        double getGeneralCoeffAlphaObjLeader(int pr, int s) const { return coeff_obj_leader_alpha[pr][s]; }
         double getGeneralCoeffAlpha(int pr, int s, int c) const { return coeff_alpha[pr][s][c]; }
         int getGeneralNbConstrsAlpha(int pr, int s, int m) const { return constrs_alpha[pr][s][m].size(); }
         int getGeneralConstrsAlpha(int pr, int s, int m, int j) const { return constrs_alpha[pr][s][m][j]; }
@@ -183,9 +190,9 @@ class Instance {
         int getGeneralBdubsAlpha(int pr, int s, int m, int j) const { return bdubs_alpha[pr][s][m][j]; }
 
         // Getters for evaluation scenarios information for general decision-dependent case.
-        double getGeneralDirectionEval(int s, int i) const { return dir_eval_dep_gen[s][i]; }
-        double getGeneralStepEval(int s) const { return step_eval_dep_gen[s]; }
-        double getGeneralAccepEval(int s) const { return accep_eval_dep_gen[s]; }
+        double getGeneralDirectionEval(int pr, int s, int i) const { return dir_eval_dep_gen[pr][s][i]; }
+        double getGeneralStepEval(int pr, int s) const { return step_eval_dep_gen[pr][s]; }
+        double getGeneralAccepEval(int pr, int s) const { return accep_eval_dep_gen[pr][s]; }
 
         // Getters for configurations to compare current model optimal decision.
         const std::vector<double> & getFixStrongWeakCoopConfigs() const { return fix_strwk_cg; }
@@ -197,10 +204,15 @@ class Instance {
         
         // Getters for strong-weak probability for current follower optimal objective value.
         double getStrongWeakProbab(double) const;                                            // Return probability optimistic case for current decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
-        double getEvalDepStrongWeakProbab(double, Input::TypesDepStrongWeak, double) const;  // Return probability optimistic case for given decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
+        
+        // Evaluation of strong-weak fixed case for current leader decision.
+        void evaluateFixStrongWeak(double &, double &, double, double, double, double, double) const;
+
+        // Evaluation of strong-weak decision-dependent case for current leader decision.
+        void evaluateDepStrongWeak(double &, double &, double, double, double, double, double, Input::TypesDepStrongWeak, double) const;
 
         // Evaluation of general decision-dependent case for current leader decision.
-        void evaluateDepGeneral(double &, double &, double &, double &, const double *, const double *, double, Input::TypesDepGeneral, int, double);
+        void evaluateDepGeneral(double &, double &, double &, double &, double &, double &, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double);
         
         // Display instance information.
         void display() const;

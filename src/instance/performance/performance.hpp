@@ -3,30 +3,18 @@
 
 #include <Eigen/Dense>
 
-// Basic Statistics
-Eigen::VectorXd columnMean(const Eigen::MatrixXd &);
-Eigen::VectorXd columnVariance(const Eigen::MatrixXd &);
+// Autocorrelation Time.
+Eigen::VectorXd autocorrelationTime(const std::vector<Eigen::MatrixXd> & x, std::string method = "bulk", int maxLag = -1);
 
-// Autocorrelation
-Eigen::VectorXd autocorrelation(const Eigen::VectorXd &x);
-double autocorrelationTimeMean(const Eigen::VectorXd & x, int maxLag = -1);
-double autocorrelationTimeBulk(const Eigen::VectorXd & x, int maxLag = -1);
+// Effective Sample Size.
+double ess(const std::vector<Eigen::VectorXd> & x, std::string method = "bulk", int maxLag = -1);
+Eigen::VectorXd ess(const std::vector<Eigen::MatrixXd> &chains, std::string method = "bulk", int maxLag = -1);
 
-// Effective Sample Size
-Eigen::VectorXd effectiveSampleSizeMean(const Eigen::MatrixXd &x);
-Eigen::VectorXd effectiveSampleSizeBulk(const Eigen::MatrixXd &x);
+// Markov Chain Standard Error.
+double mcse(const std::vector<Eigen::VectorXd> & x, bool var = false, std::string method = "bulk", int maxLag = -1);
+Eigen::VectorXd mcse(const std::vector<Eigen::MatrixXd> &chains, bool var = false, std::string method = "bulk", int maxLag = -1);
 
-double multivariateESSMean(const Eigen::MatrixXd &);
-double multivariateESSBulk(const Eigen::MatrixXd &);
-
-// Markov Chain Standard Error
-Eigen::VectorXd mcsePerDimension(const Eigen::MatrixXd &x, int maxLag = 100);
-Eigen::VectorXd mcseMultivariate(const Eigen::MatrixXd &);
-
-
-Eigen::VectorXd autocorrelationNew(const Eigen::VectorXd &x, int maxLag);
-double computeTauHat(const std::vector<Eigen::VectorXd> &autocorrs, const Eigen::VectorXd &withinVar, double varEst);
-double effectiveSampleSize(const std::vector<Eigen::MatrixXd> &chains, int dim, int maxLag = -1);
-Eigen::VectorXd effectiveSampleSize(const std::vector<Eigen::MatrixXd> &chains, int maxLag = -1);
+// R-hat.
+Eigen::VectorXd rhat(const std::vector<Eigen::MatrixXd> &chains);
 
 #endif 

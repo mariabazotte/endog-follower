@@ -487,6 +487,9 @@ void AbstractFollowerSolver::computeStrongWeakInteriorSolutions(bool compute_str
     
     GRBModel * model_eval = new GRBModel(*leader->getGRBEnv());
 
+    if(input.getVerbose() < 1) model_eval->set(GRB_IntParam_OutputFlag, 0);
+    else model_eval->set(GRB_IntParam_OutputFlag, 1);
+
     // Follower variables.
     GRBVar * y_eval = model_eval->addVars(instance.getModel()->nb_follower_vars,GRB_CONTINUOUS);
     for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
@@ -642,23 +645,14 @@ void AbstractFollowerSolver::computeStrongWeakInteriorSolutions(bool compute_str
         model_eval->update();
         model_eval->optimize();
 
-        // model_eval->write("slack.lp");
-
         Status status_eval = statusFromGurobi(model_eval->get(GRB_IntAttr_Status));
         if(status_eval == Status::Optimal){
-            std::cout << "slack max: " << model_eval->get(GRB_DoubleAttr_ObjVal) << std::endl;
-
+            
             if(yi_) delete[] yi_;
             yi_ = model_eval->get(GRB_DoubleAttr_X,y_eval,instance.getModel()->nb_follower_vars);
 
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                std::cout << yi_[i] << std::endl;
-            }
-
-            // if(input.isFollowerNearOpt() == true) fw_eps_ = f_eval.get(GRB_DoubleAttr_X);
+            if(input.isFollowerNearOpt() == true) fi_eps_ = f_eval.get(GRB_DoubleAttr_X);
         }
-
-
     }
 }
 

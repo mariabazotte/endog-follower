@@ -6,13 +6,13 @@ void FixStrongWeakFollowerSolver::defineLeaderObj(){
     Fw.set(GRB_DoubleAttr_Obj,(1.0-input.getFixCoopLevel()));
 }
 
-double FixStrongWeakFollowerSolver::evaluate(){ 
-    eval_avg = (Fs_*input.getFixCoopLevel() + Fw_*(1.0-input.getFixCoopLevel()));
-    
-    double eval = eval_avg;
+void FixStrongWeakFollowerSolver::evaluate(double & mean, double & variance){  
+    double x_obj_leader = 0.0;
     for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
-        eval += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
-    return eval; 
+        x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
+    
+    mean = x_obj_leader + (Fs_*input.getFixCoopLevel() + Fw_*(1.0-input.getFixCoopLevel()));
+    variance = 0.0;
 }
 
 void FixStrongWeakFollowerSolver::computeStrongWeakInteriorSolutions(){

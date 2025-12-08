@@ -79,7 +79,6 @@ class Input {
         std::ofstream compFile;                    /* Ofstream to write the comparison results in comparison_file. */
 
         // Solution parameters.
-        double seed;                               /* Seed for scenario generation. */
         double time_limit;                         /* Time limit for optimization. */
         double nb_threads;                         /* Number of threads for gurobi. */
         double verbose;                            /* Verbose (print configuration). */
@@ -92,6 +91,8 @@ class Input {
         int nbvalidateproblems;        /* Number of problems for the validation process. (markov chain monte carlo) */
         int nbvalidatescenarios;       /* Number of scenarios for the validation process. (markov chain monte carlo) */
         int nbvalidatethinning;        /* Number of thinning for the validation process. (markov chain monte carlo) */
+
+        bool coordinate_har;           /* 0 -> Do not use coordinate hit-and-run (use full version), 1 -> Use coordinate hit-and-run. */
         
         void defaultParams();          /* Define default values for parameters. */
         void testParameters();         /* Test parameters value. */
@@ -104,7 +105,6 @@ class Input {
 
         // Instance
         std::string getInstanceFile() const { return instance_file; }
-        double getEpsBigM() const { return eps_bigm; }
 
         // Problem definition
         Input::FollowerBehavior getFollowerBehavior() const { return follower_behavior; }
@@ -134,8 +134,8 @@ class Input {
         // General parameters
         double getTimeLimit() const { return time_limit; }
         int getNbThreads() const { return nb_threads; }
-        double getSeed() const { return seed; }
         int getVerbose() const { return verbose; }
+        double getEpsBigM() const { return eps_bigm; }
 
         // Scenarios 
         int getNbProblemsSAA() const { return nbproblemsSAA; }
@@ -145,6 +145,8 @@ class Input {
         int getNbValidateProblems() const { return nbvalidateproblems; }
         int getNbValidateScenarios() const { return nbvalidatescenarios; }
         int getNbValidateThinning() const { return nbvalidatethinning; }
+
+        bool coordinateHitAndRun() const { return coordinate_har; }
 
         // Auxiliar
         std::string doubleToString(double);

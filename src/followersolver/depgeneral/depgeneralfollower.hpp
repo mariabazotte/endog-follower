@@ -45,7 +45,7 @@ class DepGeneralFollowerSolver : public AbstractFollowerSolver {
         
         ~DepGeneralFollowerSolver() {}
 
-        double evaluate();
+        void evaluate(double &, double &);
 
         void computeStrongWeakInteriorSolutions();
 };

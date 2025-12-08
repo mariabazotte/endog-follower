@@ -1,38 +1,83 @@
 #include "performance.hpp"
 
-// Mean of each sample column.
-Eigen::VectorXd columnMean(const Eigen::MatrixXd &samples) {
-    return samples.colwise().mean();
-}
+// Compute inter and intra mean and variance.
+void computeMeanVars(const std::vector<Eigen::VectorXd> &x, 
+                    Eigen::VectorXd & intra_mean, Eigen::VectorXd & intra_var, 
+                    double & inter_mean, double & betw_var, double & with_var, double & est_var) {
+    int numChains = x.size();
+    int numDraws = x[0].rows();
 
-// Variance of each sample column.
-Eigen::VectorXd columnVariance(const Eigen::MatrixXd &samples) {
-    Eigen::VectorXd mean = columnMean(samples);
-    Eigen::MatrixXd centered = samples.rowwise() - mean.transpose();
-    return (centered.array().square().colwise().sum() / (samples.rows() - 1)).transpose();
-}
+    intra_mean.resize(numChains);
+    intra_var.resize(numChains);
 
-// Autocorrelation for a vector up to maxLag.
-Eigen::VectorXd autocorrelation(const Eigen::VectorXd &x, int maxLag) {
-    int N = x.size();
-    Eigen::VectorXd ac(maxLag + 1);
-    double mean = x.mean();
-    double var = (x.array() - mean).square().sum() / (N - 1); // unbiased
-
-    for (int lag = 0; lag <= maxLag; lag++) {
-        double c = 0.0;
-        for (int i = 0; i < N - lag; i++)
-            c += (x[i] - mean) * (x[i + lag] - mean);
-        ac(lag) = c / ((N - 1) * var); // unbiased normalization
+    for (int m = 0; m < numChains; m++) {
+        intra_mean(m) = x[m].mean();
+        intra_var(m) = ((x[m].array() - intra_mean(m)).square().sum()) / (numDraws - 1);
     }
+                    
+    // Compute between inter-chain mean.
+    inter_mean = intra_mean.mean();
+
+    // Compute between inter-chain variance.
+    betw_var = 0.0;
+    if (numChains > 1) {
+        for (int m = 0; m < numChains; m++)
+            betw_var += std::pow(intra_mean(m) - inter_mean, 2);
+        betw_var *= numDraws / (numChains - 1);
+    }
+
+    // Compute within intra-chain variance.
+    with_var = intra_var.mean();
+
+    // Variance estimate.
+    est_var = ((numDraws - 1) * with_var + betw_var) / numDraws;
+}
+
+// Autocorrelation of a vector up to maxLag. (multi-chain pooled)
+Eigen::VectorXd autocorrelation(const std::vector<Eigen::VectorXd> & x, int maxLag) {
+    int numChains = x.size();
+    int N = x[0].size();
+    
+    Eigen::VectorXd ac(maxLag + 1);
+
+    // Compute mean and variance.
+    Eigen::VectorXd intra_mean, intra_var;
+    double inter_mean, betw_var, with_var, est_var;
+    computeMeanVars(x, intra_mean, intra_var, inter_mean, betw_var, with_var, est_var);
+
+    // Case zero variance.
+    if (est_var <= 0.0) {
+        ac.setZero();
+        ac(0) = 1.0;
+        return ac;
+    }
+
+    // Compute autocorrelation.
+    for (int lag = 0; lag <= maxLag; lag++) {
+        double avg_c = 0.0;
+        
+        for (int m = 0; m < numChains; ++m) {
+            const Eigen::VectorXd & chain = x[m];
+            double mean_m = intra_mean(m);
+            
+            double c = 0.0;
+            for (int i = 0; i < N - lag; i++) {
+                c += (chain(i) - mean_m) * (chain(i + lag) - mean_m);
+            }
+            c /= (N - lag);
+            avg_c += c;
+        }
+        avg_c /= (double)numChains; 
+
+        ac(lag) = 1.0 - (with_var - avg_c) / est_var;
+    }
+    ac(0) = 1.0;
+
     return ac;
 }
 
-// Autocorrelation time (sum until first negative)
-double autocorrelationTimeMean(const Eigen::VectorXd &x, int maxLag) {
-    int N = x.size();
-    if (maxLag <= 0) maxLag = N - 1;
-
+// Autocorrelation time. (sum until first negative)
+double autocorrelationTimeMean(const std::vector<Eigen::VectorXd> & x, int maxLag) {
     Eigen::VectorXd ac = autocorrelation(x, maxLag);
     double tau = 0.0;
     for (int k = 1; k <= maxLag; k++) {
@@ -42,219 +87,209 @@ double autocorrelationTimeMean(const Eigen::VectorXd &x, int maxLag) {
     return 1.0 + 2.0 * tau;
 }
 
-// Autocorrelation time (Geyer IPS / bulk)
-double autocorrelationTimeBulk(const Eigen::VectorXd &x, int maxLag) {
-    int N = x.size();
-    if (maxLag <= 0) maxLag = N - 1;
-
+// Autocorrelation time. (Geyer IPS / bulk)
+double autocorrelationTimeBulk(const std::vector<Eigen::VectorXd> & x, int maxLag) {
     Eigen::VectorXd ac = autocorrelation(x, maxLag);
-
     double tau = 1.0;
-    for (int k = 1; k + 1 <= maxLag; k += 2) {
+    int k = 1;
+    while (k + 1 <= maxLag) {
         double pair_sum = ac[k] + ac[k + 1];
         if (pair_sum <= 0) break;
         tau += 2.0 * pair_sum;
+        k += 2;
+    }
+    if (k <= maxLag && ac[k] > 0) {
+        tau += ac[k];  
     }
 
     return tau;
 }
 
-// Univariate ESS per sample dimension.
-Eigen::VectorXd effectiveSampleSizeMean(const Eigen::MatrixXd &samples) {
-    int d = samples.cols();
-    int N = samples.rows();
-    Eigen::VectorXd ess(d);
+///////////////////////////////////////////////////////////////////////////////////////////////
 
-    for (int j = 0; j < d; j++) {
-        double tau = autocorrelationTimeMean(samples.col(j));
-        ess(j) = N / tau;
-    }
-    return ess;
-}
-
-// Univariate ESS per column (bulk)
-Eigen::VectorXd effectiveSampleSizeBulk(const Eigen::MatrixXd &samples) {
-    int d = samples.cols();
-    int N = samples.rows();
-    Eigen::VectorXd ess(d);
-
-    for (int j = 0; j < d; j++) {
-        double tau = autocorrelationTimeBulk(samples.col(j));
-        ess(j) = N / tau;
-    }
-    return ess;
-}
-
-// Multivariate ESS 
-double multivariateESSMean(const Eigen::MatrixXd &samples) {
-    int N = samples.rows();
-    int d = samples.cols();
-
-    double tau_sum = 0.0;
-    for (int j = 0; j < d; j++) {
-        double tau_j = autocorrelationTimeMean(samples.col(j)); // old ESS per dimension
-        tau_sum += tau_j;
-    }
-
-    double tau_avg = tau_sum / d;
-
-    return N / tau_avg; // approximate multivariate ESS
-}
-
-// Multivariate ESS (bulk)
-double multivariateESSBulk(const Eigen::MatrixXd &samples) {
-    int N = samples.rows();
-    int d = samples.cols();
-
-    // Compute univariate bulk autocorrelation time per dimension
-    double tau_sum = 0.0;
-    for (int j = 0; j < d; j++) {
-        double tau_j = autocorrelationTimeBulk(samples.col(j));
-        tau_sum += tau_j;
-    }
-
-    double tau_avg = tau_sum / d;
-
-    return N / tau_avg; // approximate multivariate ESS
-}
-
-// Per-dimension MCSE
-Eigen::VectorXd mcsePerDimension(const Eigen::MatrixXd &samples, int maxLag) {
-    Eigen::VectorXd essVec = effectiveSampleSizeMean(samples);
-    Eigen::VectorXd stdDev = columnVariance(samples).array().sqrt();
-    return stdDev.array() / essVec.array().sqrt();
-}
-
-// Multivariate MCSE (covariance-based)
-Eigen::VectorXd mcseMultivariate(const Eigen::MatrixXd &samples) {
-    double essMulti = multivariateESSMean(samples);
-    Eigen::MatrixXd cov = (samples.rowwise() - columnMean(samples).transpose()).transpose() *
-                   (samples.rowwise() - columnMean(samples).transpose()) / (samples.rows() - 1);
-    Eigen::MatrixXd covMean = cov / essMulti;
-    return covMean.diagonal().array().sqrt();
-}
-
-
-
-
-
-
-// Autocorrelation of a vector up to maxLag
-Eigen::VectorXd autocorrelationNew(const Eigen::VectorXd &x, int maxLag) {
-    int N = x.size();
-    if (maxLag < 0) maxLag = N - 1;
-    Eigen::VectorXd ac(maxLag + 1);
-    double mean = x.mean();
-    double var = (x.array() - mean).square().sum() / N;
-
-    for (int lag = 0; lag <= maxLag; lag++) {
-        double c = 0.0;
-        for (int i = 0; i < N - lag; i++) {
-            c += (x[i] - mean) * (x[i + lag] - mean);
-        }
-        ac(lag) = c / ((N - lag) * var);
-    }
-    return ac;
-}
-
-
-// Compute tauHat using Geyer’s initial monotone sequence
-double computeTauHat(const std::vector<Eigen::VectorXd> &autocorrs, const Eigen::VectorXd &withinVar, double varEst) {
-    int numChains = autocorrs.size();
-    int numDraws = autocorrs[0].size();
-    std::vector<double> rhoHat;
-
-    double rhoEven = 0, rhoOdd = 0;
-
-    for (int t = 0; t < numDraws / 2; t++) {
-        double acov = 0.0;
-        for (int m = 0; m < numChains; m++) {
-            acov += (numDraws - 1) * withinVar(m) * autocorrs[m](2 * t);
-        }
-        acov /= numChains * numDraws;
-        rhoEven = (t == 0 ? 1.0 : 1.0 - (withinVar.mean() - acov) / varEst);
-
-        acov = 0.0;
-        for (int m = 0; m < numChains; m++) {
-            acov += (numDraws - 1) * withinVar(m) * autocorrs[m](2 * t + 1);
-        }
-        acov /= numChains * numDraws;
-        rhoOdd = 1.0 - (withinVar.mean() - acov) / varEst;
-
-        if (rhoEven + rhoOdd <= 0) break;
-
-        rhoHat.push_back(rhoEven);
-        rhoHat.push_back(rhoOdd);
-    }
-
-    if (rhoEven > 0) rhoHat.push_back(rhoEven);
-
-    // Apply initial monotone sequence
-    for (size_t t = 1; t < (rhoHat.size() - 2) / 2; t++) {
-        if (rhoHat[2 * t] + rhoHat[2 * t + 1] > rhoHat[2 * t - 2] + rhoHat[2 * t - 1]) {
-            rhoHat[2 * t] = (rhoHat[2 * t - 2] + rhoHat[2 * t - 1]) / 2;
-            rhoHat[2 * t + 1] = rhoHat[2 * t];
-        }
-    }
-
-    double tauHat = -1.0;
-    for (size_t t = 0; t < rhoHat.size() / 2; t++) {
-        tauHat += 2.0 * (rhoHat[2 * t] + rhoHat[2 * t + 1]);
-    }
-    if (rhoHat.size() % 2) tauHat += rhoHat.back();
-
-    return tauHat;
-}
-
-// Univariate ESS per dimension with multiple chains
-double effectiveSampleSize(const std::vector<Eigen::MatrixXd> &chains, int dim, int maxLag) {
-    int numChains = chains.size();
-    if (numChains == 0) throw std::invalid_argument("No chains for ESS.");
-
+Eigen::VectorXd autocorrelationTime(const std::vector<Eigen::MatrixXd> & chains, std::string method, int maxLag) {
+    int numChains = (int)chains.size();
     int numDraws = chains[0].rows();
-    if (numDraws == 0) throw std::invalid_argument("Chains have zero draws.");
+    int numDim = chains[0].cols();
 
-    // 1. Compute intra-chain means and variances
-    Eigen::VectorXd intraMean(numChains);
-    Eigen::VectorXd intraVar(numChains);
-    std::vector<Eigen::VectorXd> autocorrs(numChains);
-
-    double interChainMean = 0.0;
-
-    for (int m = 0; m < numChains; m++) {
-        intraMean(m) = chains[m].col(dim).mean();
-        interChainMean += intraMean(m);
-        intraVar(m) = ((chains[m].col(dim).array() - intraMean(m)).square().sum()) / (numDraws - 1);
-        autocorrs[m] = autocorrelationNew(chains[m].col(dim), maxLag);
-    }
-    interChainMean /= numChains;
-
-    // 2. Between-chain variance
-    double betweenVar = 0.0;
-    if (numChains > 1) {
-        for (int m = 0; m < numChains; m++)
-            betweenVar += std::pow(intraMean(m) - interChainMean, 2);
-        betweenVar *= numDraws / (numChains - 1);
+    if(numChains == 0) throw std::invalid_argument("autocorrelationTime: No chains for computation.");
+    if(numDraws == 0) throw std::invalid_argument("autocorrelationTime: Chains have zero draws.");
+    if(numDim == 0) throw std::invalid_argument("autocorrelationTime: Chains have zero dimension.");
+    for (const auto & chain : chains) {
+        if (chain.rows() != numDraws) throw std::invalid_argument("autocorrelationTime: Inconsistent parameter draws across chains.");
+        if (chain.cols() != numDim) throw std::invalid_argument("autocorrelationTime: Inconsistent parameter dimension across chains.");
     }
 
-    // 3. Within-chain variance
-    double withinVar = intraVar.mean();
+    if(method != "mean" && method != "bulk") 
+        throw std::invalid_argument("autocorrelationTime: Method must be \"mean\" or \"bulk\".");
 
-    // 4. Variance estimate
-    double varEst = ((numDraws - 1) * withinVar + betweenVar) / numDraws;
+    if(maxLag < 0 || maxLag > numDraws - 1) maxLag = numDraws - 1;
 
-    // 5. Compute tauHat
-    double tauHat = computeTauHat(autocorrs, intraVar, varEst);
+    Eigen::VectorXd acc_time(numDim);
+    for (int d = 0; d < numDim; d++){
+        std::vector<Eigen::VectorXd> x;
+        for(int m = 0; m < numChains; ++m) x.push_back(chains[m].col(d));
 
-    // 6. ESS
-    return std::min(numChains * numDraws / tauHat, numChains * numDraws * std::log10(numChains * numDraws));
+        if(method == "mean") acc_time(d) = autocorrelationTimeMean(x, maxLag);
+        else if(method == "bulk") acc_time(d) = autocorrelationTimeBulk(x, maxLag);
+    }
+
+    return acc_time;
 }
 
-// Compute ESS for all dimensions
-Eigen::VectorXd effectiveSampleSize(const std::vector<Eigen::MatrixXd> &chains, int maxLag) {
-    int dims = chains[0].cols();
-    Eigen::VectorXd ess(dims);
-    for (int d = 0; d < dims; d++)
-        ess(d) = effectiveSampleSize(chains, d, maxLag);
-    return ess;
+// Compute efficient sample size per dimension with multiple chains.
+double ess(const std::vector<Eigen::VectorXd> & x, std::string method, int maxLag) {
+    int numChains = x.size();
+    int numDraws = x[0].size();
+
+    if(numChains == 0) throw std::invalid_argument("ess: No chains for computation.");
+    if(numDraws == 0) throw std::invalid_argument("ess: Chains have zero draws.");
+    for (const auto & chain : x) {
+        if (chain.size() != numDraws) throw std::invalid_argument("ess: Inconsistent parameter draws across chains.");
+    }
+
+    if(method != "mean" && method != "bulk") 
+        throw std::invalid_argument("ess: Method must be \"mean\" or \"bulk\".");
+
+    if (maxLag < 0 || maxLag > numDraws - 1) maxLag = numDraws - 1;
+
+    // Computing tau.
+    double tau = 1.0;
+    if(method == "mean") tau = autocorrelationTimeMean(x, maxLag);
+    else if(method == "bulk") tau = autocorrelationTimeBulk(x, maxLag);
+    else throw std::invalid_argument("ess: method must be \"mean\" or \"bulk\"");
+    if (!(tau > 0)) tau = 1.0;
+
+    return (numChains * numDraws / tau);
+}
+
+// Compute efficient sample size for all dimensions.
+Eigen::VectorXd ess(const std::vector<Eigen::MatrixXd> &chains, std::string method, int maxLag) {
+    int numChains = chains.size();
+    int numDraws = chains[0].rows();
+    int numDim = chains[0].cols();
+
+    if(numChains == 0) throw std::invalid_argument("ess: No chains for computation.");
+    if(numDraws == 0) throw std::invalid_argument("ess: Chains have zero draws.");
+    if(numDim == 0) throw std::invalid_argument("ess: Chains have zero dimension.");
+    for (const auto & chain : chains) {
+        if (chain.rows() != numDraws) throw std::invalid_argument("ess: Inconsistent parameter draws across chains.");
+        if (chain.cols() != numDim) throw std::invalid_argument("ess: Inconsistent parameter dimension across chains.");
+    }
+
+    if(method != "mean" && method != "bulk") 
+        throw std::invalid_argument("ess: Method must be \"mean\" or \"bulk\".");
+
+    if (maxLag < 0 || maxLag > numDraws - 1) maxLag = numDraws - 1;
+
+    Eigen::VectorXd vector_ess(numDim);
+    for (int d = 0; d < numDim; d++){
+        std::vector<Eigen::VectorXd> chains_dim;
+        for(int m = 0; m < numChains; ++m) chains_dim.push_back(chains[m].col(d));
+
+        vector_ess(d) = ess(chains_dim, method, maxLag);
+    }
+    return vector_ess;
+}
+
+// Compute markov chain standard error for one dimensions.
+double mcse(const std::vector<Eigen::VectorXd> & x, bool var, std::string method, int maxLag) {
+    int numChains = x.size();
+    int numDraws = x[0].size();
+
+    if(numChains == 0) throw std::invalid_argument("mcse: No chains for computation.");
+    if(numDraws == 0) throw std::invalid_argument("mcse: Chains have zero draws.");
+    for (const auto & chain_x : x) {
+        if (chain_x.size() != numDraws) throw std::invalid_argument("mcse: Inconsistent parameter draws across chains.");
+    }
+
+    if(method != "mean" && method != "bulk") 
+        throw std::invalid_argument("mcse: Method must be \"mean\" or \"bulk\".");
+
+    if (maxLag < 0 || maxLag > numDraws - 1) maxLag = numDraws - 1;
+
+    // Compute variance estimate for this dimension.
+    Eigen::VectorXd intra_mean, intra_var;
+    double inter_mean, betw_var, with_var, est_var;
+    computeMeanVars(x, intra_mean, intra_var, inter_mean, betw_var, with_var, est_var);
+
+    // Compute ESS using your existing function.
+    double value_ess = ess(x, method, maxLag);
+
+    // Define MCSE: if ESS <= 0 or est_var <=0, set MCSE to 0.
+    if(var == true) return (value_ess >= 1e-12 && est_var >= 1e-12) ? (est_var / value_ess) : 0.0;
+    else return (value_ess >= 1e-12 && est_var >= 1e-12) ? std::sqrt(est_var / value_ess) : 0.0;
+}
+
+// Compute markov chain standard error for all dimensions.
+Eigen::VectorXd mcse(const std::vector<Eigen::MatrixXd> & chains, bool var, std::string method, int maxLag) {
+    int numChains = (int)chains.size();
+    int numDraws = chains[0].rows();
+    int numDim = chains[0].cols();
+
+    if(numChains == 0) throw std::invalid_argument("mcse: No chains for computation.");
+    if(numDraws == 0) throw std::invalid_argument("mcse: Chains have zero draws.");
+    if(numDim == 0) throw std::invalid_argument("mcse: Chains have zero dimension.");
+    for (const auto & chain : chains) {
+        if (chain.rows() != numDraws) throw std::invalid_argument("mcse: Inconsistent parameter draws across chains.");
+        if (chain.cols() != numDim) throw std::invalid_argument("mcse: Inconsistent parameter dimension across chains.");
+    }
+
+    if(method != "mean" && method != "bulk") 
+        throw std::invalid_argument("mcse: Method must be \"mean\" or \"bulk\".");
+
+    if (maxLag < 0 || maxLag > numDraws - 1) maxLag = numDraws - 1;
+
+    Eigen::VectorXd vector_mcse(numDim);
+    for (int d = 0; d < numDim; d++){
+        // Define auxiliar vector with column.
+        std::vector<Eigen::VectorXd> chains_dim;
+        for(int m = 0; m < numChains; ++m) chains_dim.push_back(chains[m].col(d));
+
+        // Define MCSE
+        vector_mcse(d) = mcse(chains_dim, var, method, maxLag);
+    }
+    return vector_mcse;
+}
+
+// Gelman-Rubin R-hat (per-dimension)
+Eigen::VectorXd rhat(const std::vector<Eigen::MatrixXd> &chains) {
+    int numChains = (int)chains.size();
+    int numDraws = chains[0].rows();
+    int numDim = chains[0].cols();
+
+    if(numChains <= 1) throw std::invalid_argument("rhat Needs at least two chains for computation.");
+    if(numDraws <= 1) throw std::invalid_argument("rhat: Need at least 2 draws per chain for computation.");
+    if(numDim == 0) throw std::invalid_argument("rhat: Chains have zero dimension.");
+    for (const auto &chain : chains) {
+        if (chain.rows() != numDraws) throw std::invalid_argument("rhat: Inconsistent parameter draws across chains.");
+        if (chain.cols() != numDim) throw std::invalid_argument("rhat: Inconsistent parameter dimension across chains.");
+    }
+
+    Eigen::VectorXd out(numDim);
+    for (int d = 0; d < numDim; ++d) {
+
+        std::vector<Eigen::VectorXd> chains_dim;
+        for(int m = 0; m < numChains; ++m) chains_dim.push_back(chains[m].col(d));
+
+        // Compute variance estimate for this dimension.
+        Eigen::VectorXd intra_mean, intra_var;
+        double inter_mean, betw_var, with_var, est_var;
+        computeMeanVars(chains_dim, intra_mean, intra_var, inter_mean, betw_var, with_var, est_var);
+
+        // If with_var is zero (all chains constant), define rhat = 1.
+        if (with_var <= 0.0) {
+            out(d) = 1.0;
+            continue;
+        }
+
+        // Prevent negative or zero.
+        if (est_var <= 0.0) {
+            out(d) = 1.0;
+            continue;
+        }
+
+        out(d) = std::sqrt(est_var/with_var);
+    }
+    return out;
 }

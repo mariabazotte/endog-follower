@@ -2,126 +2,124 @@
 #include "../followersolver/followersolver.hpp" 
 
 std::string AbstractLeaderSolver::writeHeadComp() const {
-    return "FOLLOWER_BEHAVIOR;COOPERATION_TYPE;PARAMS;VALUE;";
+    std::string result = "FOLLOWER_BEHAVIOR;COOPERATION_TYPE;PARAMS;";
+    result += "LEADER_OBJ_MEAN;LEADER_OBJ_VARIANCE;LEADER_VARS_ESS;LEADER_VARS_RHAT;";
+    result += "FOLLOWER_OBJ_OPT;";
+    if(input.isFollowerNearOpt() == true){
+        result += "FOLLOWER_OBJ_NEAROPT_MEAN;FOLLOWER_OBJ_NEAROPT_VARIANCE;";
+    }
+    return result;
+}
+
+void AbstractLeaderSolver::writeCompFixStrongWeak(std::string & output, double cooperation, 
+                                                double eval, double fs_, double f_eval) const {
+    output += std::to_string(Input::FollowerBehavior::FixStrongWeak) + ";-;" + 
+              std::to_string(cooperation) + ";" + 
+              std::to_string(eval) + ";-;-;-;" + std::to_string(fs_) + ";";
+    if(input.isFollowerNearOpt() == true) 
+        output += std::to_string(f_eval) + ";-;";
+    else output += "-;-;";
+    output += "\n";
+}
+
+void AbstractLeaderSolver::writeCompDepStrongWeak(std::string & output, Input::TypesDepStrongWeak type, double param, 
+                                                double eval, double fs_, double f_eval) const {
+    output += std::to_string(Input::FollowerBehavior::DepStrongWeak) + ";" + 
+              std::to_string(type) + ";" + std::to_string(param) + ";" + 
+              std::to_string(eval) + ";-;-;-;" + std::to_string(fs_) + ";";
+    if(input.isFollowerNearOpt() == true) 
+        output += std::to_string(f_eval) + ";-;";
+    else output += "-;-;";
+    output += "\n";
+}
+
+void AbstractLeaderSolver::writeCompDepGeneral(std::string & output, Input::TypesDepGeneral type, int nb_int, double param, 
+                                                double eval, double var_eval, double ess, double rhat,
+                                                double fs_, double f_eval, double f_var_eval) const {
+    output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
+              std::to_string(type) + ";" + std::to_string(nb_int) + "/" + std::to_string(param) + ";" +
+              std::to_string(eval) + ";" + std::to_string(var_eval) + ";" +
+              std::to_string(ess) + ";" + std::to_string(rhat) + ";" + std::to_string(fs_) + ";";
+    if(input.isFollowerNearOpt() == true){  
+        output += std::to_string(f_eval) + ";" + std::to_string(f_var_eval) + ";";
+    } 
+    output += "\n";
 }
 
 std::string AbstractLeaderSolver::writeComp() const {
-    // Define part of objective involving only leader variables.
-    double obj = 0.0;
+    // Define leader objective involving only leader variables.
+    double x_leader_obj = 0.0;
     for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
-        obj += instance.getModel()->leader_vars[i].obj_leader*getX_(i);
+        x_leader_obj += instance.getModel()->leader_vars[i].obj_leader*getX_(i);
 
-    // Compute follower strong and weak solutions for the fixed leader decision.
-    getFollower()->computeStrongWeakInteriorSolutions();
+    // Auxiliar parameters.
+    double Fs_ = getFollower()->getLeaderOptObj();
+    double Fw_ = getFollower()->getLeaderPesObj();
+    double fs_ = getFollower()->getFollowerOptimalObj();
+    double fs_eps_ = (input.isFollowerNearOpt() == true) ? getFollower()->getFollowerNearOptimalOptObj() : 0.0;
+    double fw_eps_ = (input.isFollowerNearOpt() == true) ? getFollower()->getFollowerNearOptimalPesObj() : 0.0;
+    double eval, f_eval, var_eval, f_var_eval, ess, rhat;
 
-    double leader_val = 0.0;
-    for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i)
-        leader_val += instance.getModel()->follower_vars[i].obj_leader*getFollower()->getYi_(i);
-
-    std::cout << "leader: " << leader_val << std::endl;
-
+    // Define output string.
     std::string output = "";
 
     // Fixed Strong-Weak configurations.
     for(double beta: instance.getFixStrongWeakCoopConfigs()){
-        double val = beta*getFollower()->getLeaderOptObj() + (1.0-beta)*getFollower()->getLeaderPesObj();
-        
-        output += std::to_string(Input::FollowerBehavior::FixStrongWeak) + ";-;" + 
-                  std::to_string(beta) + ";" + std::to_string((obj+val)) + ";\n";
+        instance.evaluateFixStrongWeak(eval,f_eval,Fs_,Fw_,fs_eps_,fw_eps_,beta);
+        writeCompFixStrongWeak(output,beta,(x_leader_obj+eval),fs_,f_eval);
     }
 
-    // Dependent Strong Weak configuations.
-
-    // Proportional
-    double beta = instance.getEvalDepStrongWeakProbab(getFollower()->getFollowerOptimalObj(),
-                                                Input::TypesDepStrongWeak::Proportional,0.0);
-    double val = beta*getFollower()->getLeaderOptObj() + (1.0-beta)*getFollower()->getLeaderPesObj();
-
-    output += std::to_string(Input::FollowerBehavior::DepStrongWeak) + ";" + 
-              std::to_string(Input::TypesDepStrongWeak::Proportional) + ";-;" + 
-              std::to_string((obj+val)) + ";\n";
-
-
-    // Threshold
+    // Dependent Strong-Weak configurations.
+    
+    // Proportional.
+    instance.evaluateDepStrongWeak(eval,f_eval,Fs_,Fw_,fs_,fs_eps_,fw_eps_,Input::TypesDepStrongWeak::Proportional,0.0);
+    writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::Proportional,0.0,(x_leader_obj+eval),fs_,f_eval);
+    
+    // Threshold.
     for(double param : instance.getDepStrongWeakThrConfigs()){
-        beta = instance.getEvalDepStrongWeakProbab(getFollower()->getFollowerOptimalObj(),
-                                                Input::TypesDepStrongWeak::Threshold,param);
-        val = beta*getFollower()->getLeaderOptObj() + (1.0-beta)*getFollower()->getLeaderPesObj();
-
-        output += std::to_string(Input::FollowerBehavior::DepStrongWeak) + ";" + 
-                std::to_string(Input::TypesDepStrongWeak::Threshold) + ";" +
-                std::to_string(param) + ";" + std::to_string((obj+val)) + ";\n";
+        instance.evaluateDepStrongWeak(eval,f_eval,Fs_,Fw_,fs_,fs_eps_,fw_eps_,Input::TypesDepStrongWeak::Threshold,param);
+        writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::Threshold,param,(x_leader_obj+eval),fs_,f_eval);
     }
 
-    // Strong
+    // Strong.
     for(double param : instance.getDepStrongWeakStrConfigs()){
-        beta = instance.getEvalDepStrongWeakProbab(getFollower()->getFollowerOptimalObj(),
-                                                Input::TypesDepStrongWeak::Strong,param);
-        val = beta*getFollower()->getLeaderOptObj() + (1.0-beta)*getFollower()->getLeaderPesObj();
-
-        output += std::to_string(Input::FollowerBehavior::DepStrongWeak) + ";" + 
-                std::to_string(Input::TypesDepStrongWeak::Strong) + ";" +
-                std::to_string(param) + ";" + std::to_string((obj+val)) + ";\n";
+        instance.evaluateDepStrongWeak(eval,f_eval,Fs_,Fw_,fs_,fs_eps_,fw_eps_,Input::TypesDepStrongWeak::Strong,param);
+        writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::Strong,param,(x_leader_obj+eval),fs_,f_eval);
     }
 
-    // Fragile
+    // Fragile.
     for(double param : instance.getDepStrongWeakFrgConfigs()){
-        beta = instance.getEvalDepStrongWeakProbab(getFollower()->getFollowerOptimalObj(),
-                                                Input::TypesDepStrongWeak::Fragile,param);
-        val = beta*getFollower()->getLeaderOptObj() + (1.0-beta)*getFollower()->getLeaderPesObj();
-
-        output += std::to_string(Input::FollowerBehavior::DepStrongWeak) + ";" + 
-                std::to_string(Input::TypesDepStrongWeak::Fragile) + ";" +
-                std::to_string(param) + ";" + std::to_string((obj+val)) + ";\n";
+        instance.evaluateDepStrongWeak(eval,f_eval,Fs_,Fw_,fs_,fs_eps_,fw_eps_,Input::TypesDepStrongWeak::Fragile,param);
+        writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::Fragile,param,(x_leader_obj+eval),fs_,f_eval);
     }
 
-    // Dependent General configuations.
+    // Dependent General configurations.
+    const double * x_ = getX_();
+    const double * yi_ = getFollower()->getYi_();
 
-    // Uniform
-    double eval, var_eval, f_eval, f_var_eval;
-    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,
-        getX_(),getFollower()->getYi_(),getFollower()->getFollowerOptimalObj(),
-        Input::TypesDepGeneral::Neutral, 0, 0.0);
+    // Uniform.
+    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::Neutral,0,0.0);
+    writeCompDepGeneral(output,Input::TypesDepGeneral::Neutral,0,0.0,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
 
-    output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
-                std::to_string(Input::TypesDepGeneral::Neutral) + ";-;" + 
-                std::to_string((obj+val)) + ";\n";
+    // exit(0);
 
-    std::cout << "---------------------" << std::endl;
-
-    exit(0);
-
-    // Proportional 
+    // Proportional.
     for(int nb_int: instance.getDepGeneralIntConfigs()){
         for(double scal: instance.getDepGeneralScalConfigs()){
-            double eval, var_eval, f_eval, f_var_eval;
-            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,
-                getX_(),getFollower()->getYi_(),getFollower()->getFollowerOptimalObj(),
-                Input::TypesDepGeneral::GenProportional, nb_int, scal);
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenProportional,nb_int,scal);
+            writeCompDepGeneral(output,Input::TypesDepGeneral::GenProportional,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
 
-            output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
-                    std::to_string(Input::TypesDepGeneral::GenProportional) + ";" +
-                    std::to_string(nb_int) + "/" + std::to_string(scal) + ";" + 
-                    std::to_string((obj+val)) + ";\n";
             break;
         }
         break;
     }
 
-    std::cout << "---------------------" << std::endl;
-
     // Strong Fragile 
     for(int nb_int: instance.getDepGeneralIntConfigs()){
         for(double scal: instance.getDepGeneralScalConfigs()){
-            double eval, var_eval, f_eval, f_var_eval;
-            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,
-                getX_(),getFollower()->getYi_(),getFollower()->getFollowerOptimalObj(),
-                Input::TypesDepGeneral::StrongFragile, nb_int, scal);
-
-            output += std::to_string(Input::FollowerBehavior::DepGeneral) + ";" + 
-                    std::to_string(Input::TypesDepGeneral::StrongFragile) + ";" +
-                    std::to_string(nb_int) + "/" + std::to_string(scal) + ";" + 
-                    std::to_string((obj+val)) + ";\n";
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::StrongFragile,nb_int,scal);
+            writeCompDepGeneral(output,Input::TypesDepGeneral::StrongFragile,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
+            
             break;
         }
         break;
@@ -267,6 +265,9 @@ void LeaderSolver::solve(){
 
     time_ = time(NULL) - start_time;
     if(input.getVerbose() >= 1) print();
+
+    // Follower strong, weak, and interior solutions.
+    getFollower()->computeStrongWeakInteriorSolutions();
 }
 
 std::string LeaderSolver::write() const {
@@ -372,20 +373,14 @@ void SAALeaderSolver::estimators(){
  
 void SAALeaderSolver::testProblem(int i){
     double start_eval_time = time(NULL); 
-    double eval = solvers[i]->getFollower()->evaluate();
+    double mean, variance;
+    solvers[i]->getFollower()->evaluate(mean,variance);
     time_eval += (time(NULL) - start_eval_time);
     
-    if(eval < ub){
-        ub = std::min(ub, eval);
+    if(mean < ub){
+        ub = std::min(ub, mean);
         best_problem = i;
-
-        if(input.getFollowerBehavior() == Input::FollowerBehavior::DepGeneral){
-            var_ub = 0.0;
-            for(int s = 0; s < instance.getNbValidateScenarios(); ++s)
-                var_ub += std::pow(solvers[i]->getFollower()->getDiffEvalScenario(s),2);
-            long long N = instance.getNbValidateScenarios();
-            if(N > 1) var_ub = var_ub/(N*(N-1));
-        }
+        var_ub = variance;
     }
 }
 

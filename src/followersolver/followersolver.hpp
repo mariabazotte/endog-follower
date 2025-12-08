@@ -125,7 +125,7 @@ class AbstractFollowerSolver {
         // Function to evaluate the optimal leader solution obtained after solving
         // the problem. It either computes the true expected value (enumerates all scenarios)
         //  or uses the evaluation SAA problem depending on the follower behavior.
-        virtual double evaluate() = 0;
+        virtual void evaluate(double &, double &) = 0;
 
         // Function to compute the 
         virtual void computeStrongWeakInteriorSolutions() = 0;
