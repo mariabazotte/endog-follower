@@ -26,7 +26,7 @@ class SAADepStrWkFollowerSolver : public AbstractFollowerSolver {
         
         ~SAADepStrWkFollowerSolver() { delete[] z; }
 
-        void evaluate(double &, double &);
+        void evaluate(double &, double &, double &, double &);
 
         void computeStrongWeakInteriorSolutions();
 };

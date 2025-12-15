@@ -4,8 +4,8 @@ Instance::Instance(const Input & input): input(input), instance_file(input.getIn
                                     nb_saa_problems(input.getNbProblemsSAA()), nb_saa_scenarios(input.getNbScenariosSAA()), nb_saa_thinning(input.getNbThinningSAA()),
                                     nb_val_problems(input.getNbValidateProblems()), nb_val_scenarios(input.getNbValidateScenarios()), nb_val_thinning(input.getNbValidateThinning()),
                                     uniform_eps(1e-12,1.0-1e-12), uniform(0.0,1.0), normal(0.0,1.0),
-                                    coordinate_mcmc(false), constr_normal_transform(false), polyround_transform(false), 
-                                    polyround_transform_specific(true), transform_specific_executed(false), metropolis_acceptance(true){
+                                    coordinate_mcmc(input.coordinateHitAndRun()), constr_normal_transform(false), polyround_transform(true), 
+                                    polyround_transform_specific(true), transform_specific_executed(false), metropolis_acceptance(input.metropolisHastings()){
     
     defineName();
     defineCriticalValues(); 
@@ -53,17 +53,18 @@ void Instance::defineCriticalValues(){
     else if(nb_saa_problems >= 80 && nb_saa_problems <= 199) critical_tstudent = 1.66;
 }
 
+// TODO REMOVE PI_C
 void Instance::defineDepGenParams(){
     double Fc = (bilevelmodel->leader_lb + bilevelmodel->leader_ub)/2.0;
     if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenProportional){
         double delta = (bilevelmodel->leader_ub - bilevelmodel->leader_lb)/2.0;
-        gen_ref_pt_probab = input.getScalingGeneral()*0.5*delta;
-        gen_min_probab = gen_ref_pt_probab - input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc);
-        gen_max_probab = gen_ref_pt_probab + input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc);
-    }if(input.getTypeDepGeneral() == Input::TypesDepGeneral::StrongFragile){
+        gen_ref_pt_probab = input.getMaxIntCoeffGeneral()*delta;
+        gen_min_probab = gen_ref_pt_probab - input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc);
+        gen_max_probab = gen_ref_pt_probab + input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc);
+    }if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenFragile){
         gen_ref_pt_probab = 1.0;
-        gen_min_probab = std::exp(-input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
-        gen_max_probab = std::exp(input.getScalingGeneral()*0.5*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
+        gen_min_probab = std::exp(-input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
+        gen_max_probab = std::exp(input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
     }
 }
 
@@ -216,14 +217,13 @@ void Instance::computeDepGenPolyRoundTransform(const Eigen::VectorXd & b){
     // if(do_transform) poly = pr.attr("PolyRoundApi").attr("transform_polytope")(poly);
 
     // Round polytope.
-    // try{
+    try {
         poly = pr.attr("PolyRoundApi").attr("round_polytope")(poly);
-    // }
-    // catch(py::error_already_set &e) {
-    //     std::string msg = e.what();
-    //     int max_it = pr.attr("DEFAULT_MAX_ITERATIONS").cast<int>();
-    //     poly = pr.attr("PolyRoundApi").attr("round_polytope")(poly,py::arg("max_iterations") = 10*max_it);
-    // }
+    }
+    catch(py::error_already_set &e) {
+        std::string msg = e.what();
+        std::cout << msg << " Proceeding anyway." << std::endl;
+    }
 
     // Extract A_new, b_new, transformation S and shift t (numpy is row-major, eigen is column-major)
     py::array A_new_np = poly.attr("A").attr("values").cast<py::array>();
@@ -459,11 +459,16 @@ double Instance::inverseDepStrongWeakScenario(int pr){
     if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Proportional)
         return bilevelmodel->follower_ub - uniform_eps(rd_engine[pr])*(bilevelmodel->follower_ub - bilevelmodel->follower_lb);
     else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Threshold)
-        return (bilevelmodel->follower_ub + bilevelmodel->follower_lb)/2.0 + (1.0/input.getParamThreshold())*std::log((1.0/uniform_eps(rd_engine[pr]) - 1.0));
+        return bilevelmodel->follower_lb + (bilevelmodel->follower_ub - bilevelmodel->follower_lb)*(0.5 + (1.0/input.getParamThreshold())*std::log((1.0/uniform_eps(rd_engine[pr]) - 1.0)));
+        // return (bilevelmodel->follower_ub + bilevelmodel->follower_lb)/2.0 + (1.0/input.getParamThreshold())*std::log((1.0/uniform_eps(rd_engine[pr]) - 1.0));
     else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Strong)
         return bilevelmodel->follower_lb + (bilevelmodel->follower_ub - bilevelmodel->follower_lb)*(1.0 + (1.0/input.getParamStrong())*std::log((1.0 - uniform_eps(rd_engine[pr])*(1.0 - std::exp(-input.getParamStrong())))));
     else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Fragile)
         return bilevelmodel->follower_lb - ((bilevelmodel->follower_ub - bilevelmodel->follower_lb)/input.getParamFragile())*std::log((std::exp(-input.getParamFragile()) + uniform_eps(rd_engine[pr])*(1.0 - std::exp(-input.getParamFragile()))));
+    else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::StrongPower)
+        return bilevelmodel->follower_lb + (bilevelmodel->follower_ub - bilevelmodel->follower_lb)*(std::pow((1.0 - uniform_eps(rd_engine[pr])), 1.0/input.getParamStrongPower()));
+    else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::FragilePower)
+        return bilevelmodel->follower_lb + (bilevelmodel->follower_ub - bilevelmodel->follower_lb)*(1.0 - std::pow(uniform_eps(rd_engine[pr]), 1.0/input.getParamFragilePower()));
     else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent Strong Weak Behavior."));
 }
 
@@ -662,14 +667,22 @@ double Instance::getStrongWeakProbab(double fs_) const{
         if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Proportional)
             return (bilevelmodel->follower_ub - fs_)/(bilevelmodel->follower_ub - bilevelmodel->follower_lb);
         else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Threshold){
-            double phi_c = (bilevelmodel->follower_lb + bilevelmodel->follower_ub) / 2.0;
-            return 1.0 / (1.0 + std::exp(input.getParamThreshold() * (fs_ - phi_c)));
+            double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+            return 1.0 / (1.0 + std::exp(input.getParamThreshold() * (t - 0.5)));
+            // double phi_c = (bilevelmodel->follower_lb + bilevelmodel->follower_ub) / 2.0;
+            // return 1.0 / (1.0 + std::exp(input.getParamThreshold() * (fs_ - phi_c)));
         }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Strong){
             double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
             return (1.0 - std::exp(-input.getParamStrong() * (1.0 - t))) / (1.0 - std::exp(-input.getParamStrong()));
         }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::Fragile){
             double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
-            return 1.0 - (1.0 - std::exp(-input.getParamFragile() * t)) / (1.0 - std::exp(-input.getParamFragile()));
+            return (1.0 - (1.0 - std::exp(-input.getParamFragile() * t)) / (1.0 - std::exp(-input.getParamFragile())));
+        }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::StrongPower){
+            double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+            return (1.0 - std::pow(t,input.getParamStrongPower()));
+        }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::FragilePower){
+            double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+            return std::pow((1.0 - t),input.getParamFragilePower());
         }else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent Strong Weak Behavior."));
     }
     else throw std::runtime_error(std::string("Incorrect choice of Behavior."));
@@ -679,14 +692,22 @@ double Instance::getEvalDepStrongWeakProbab(double fs_, Input::TypesDepStrongWea
     if(eval_behavior == Input::TypesDepStrongWeak::Proportional)
         return (bilevelmodel->follower_ub - fs_)/(bilevelmodel->follower_ub - bilevelmodel->follower_lb);
     else if(eval_behavior== Input::TypesDepStrongWeak::Threshold){
-        double phi_c = (bilevelmodel->follower_lb + bilevelmodel->follower_ub) / 2.0;
-        return 1.0 / (1.0 + std::exp(param * (fs_ - phi_c)));
+        double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+        return 1.0 / (1.0 + std::exp(param * (t - 0.5)));
+        // double phi_c = (bilevelmodel->follower_lb + bilevelmodel->follower_ub) / 2.0;
+        // return 1.0 / (1.0 + std::exp(param * (fs_ - phi_c)));
     }else if(eval_behavior == Input::TypesDepStrongWeak::Strong){
         double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
         return (1.0 - std::exp(-param * (1.0 - t))) / (1.0 - std::exp(-param));
     }else if(eval_behavior == Input::TypesDepStrongWeak::Fragile){
         double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
         return 1.0 - (1.0 - std::exp(-param * t)) / (1.0 - std::exp(-param));
+    }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::StrongPower){
+        double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+        return (1.0 - std::pow(t,param));
+    }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::FragilePower){
+        double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+        return std::pow((1.0 - t),param);
     }else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent Strong Weak Behavior."));
 }
 
@@ -908,7 +929,7 @@ double Instance::sampleEvalAlpha(int pr, int s, double alpha_min, double alpha_m
         double B = m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data());
         return sampleEvalLinearAlpha(pr, s, alpha_min, alpha_max, A, B);
     }
-    else if(eval_behavior == Input::TypesDepGeneral::StrongFragile){
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragile){
         double k = (m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data()))/(F_delta);
         return sampleEvalExponentialAlpha(pr, s, alpha_min, alpha_max, k);
     }
@@ -953,11 +974,11 @@ double Instance::sampleEvalExponentialAlpha(int pr, int s, double alpha_min, dou
 double Instance::getEvalDepGeneralProb(double y_obj_leader, double F_c, double F_delta, double pi_c, double m, Input::TypesDepGeneral eval_behavior) const {
     // if(eval_behavior == Input::TypesDepGeneral::GenProportional)
     //     std::cout << "Proportional: " << (pi_c + m*(y_obj_leader - F_c)) << std::endl;
-    // if(eval_behavior == Input::TypesDepGeneral::StrongFragile)
+    // if(eval_behavior == Input::TypesDepGeneral::GenFragile)
     //     std::cout << "Strong-Fragile: " << (pi_c*std::exp(m*(y_obj_leader - F_c)/(F_delta))) << std::endl;
 
     if(eval_behavior == Input::TypesDepGeneral::GenProportional) return (pi_c + m*(y_obj_leader - F_c));
-    else if(eval_behavior == Input::TypesDepGeneral::StrongFragile) return (pi_c*std::exp(m*(y_obj_leader - F_c)/(F_delta)));
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragile) return (pi_c*std::exp(m*(y_obj_leader - F_c)/(F_delta)));
     else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent General Behavior."));
 }
 
@@ -992,19 +1013,25 @@ void Instance::computeParamsDepGeneral(double Fs_, double Fw_, double fs_, Input
     F_c = (Fs_ + Fw_)/2.0;
     F_delta = Fw_ - Fs_;
 
-    // Probability centering point.
-    pi_c = 1.0;
-    if(eval_behavior == Input::TypesDepGeneral::GenProportional) 
-        pi_c = scaling*0.5*((Fw_ - Fs_)/2.0);
-
     // Coefficient.
     double interval = 1.0 / nb_int;
     double fs_prop = (bilevelmodel->follower_ub - fs_) /
-                    (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
+                     (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
     int i = std::min(static_cast<int>(fs_prop / interval), nb_int - 1);
-    m = scaling * (0.5 - ((i + 0.5) * interval));
+    m = scaling * (1.0 - 2.0*((i + 0.5) * interval));
 
-    std::cout <<" INTERVALS: " << i << " " << m << std::endl; 
+    std::cout << "fsp:" << fs_prop << " int:" << interval << std::endl;
+    std::cout << "i:" << i << std::endl;
+
+    // Probability centering point.
+    pi_c = 1.0;
+    if(eval_behavior == Input::TypesDepGeneral::GenProportional) {
+        double max_m = 0.0;
+        for(int ii = 0; ii < nb_int; ++ ii) 
+            max_m = std::max(max_m, (scaling * (1.0 - 2.0*((ii + 0.5) * interval))) );
+        std::cout << "max m:" << max_m << std::endl;
+        pi_c = (max_m + 1e-8)*((Fw_ - Fs_)/2.0);  // Include small epsilon 1e-4 to avoid probability zero.
+    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1040,6 +1067,7 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
     // Compute parameters for current evaluation.
     double F_c, F_delta, pi_c, m;
     computeParamsDepGeneral(Fs_,Fw_,fs_,eval_behavior,nb_int,scaling,F_c,F_delta,pi_c,m);
+    std::cout  << "Fc: " << F_c << " Fdelta: " << F_delta << " pi_c: " << pi_c << " m: " << m << std::endl;
 
     // Initialize samples.
     std::vector<Eigen::MatrixXd> samples(nb_val_problems);
@@ -1094,9 +1122,10 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
                     double h = getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,eval_behavior)/
                                getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,eval_behavior);
 
-                    std::cout << s << ": Leader obj current: " << computeLeaderObjFollowerVars(current_sample.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,eval_behavior) << std::endl;
-                    std::cout << s << ": Leader obj test: " << computeLeaderObjFollowerVars(test.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,eval_behavior) << std::endl;
-                    std::cout << s << ": Acceptance: " << accep_eval_dep_gen[pr][s*nb_val_thinning+t] << " " << h << " " <<  (accep_eval_dep_gen[pr][s*nb_val_thinning+t] <= h) << std::endl;
+                    // std::cout << s << ": Leader obj current: " << computeLeaderObjFollowerVars(current_sample.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,eval_behavior) << std::endl;
+                    // std::cout << s << ": Leader obj test: " << computeLeaderObjFollowerVars(test.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,eval_behavior) << std::endl;
+                    // std::cout << s << ": Possible acceptance: " << (computeLeaderObjFollowerVars(test.data())-Fs_)/(computeLeaderObjFollowerVars(current_sample.data())-Fs_) << std::endl;
+                    // std::cout << s << ": Acceptance: " << accep_eval_dep_gen[pr][s*nb_val_thinning+t] << " " << h << " " <<  (accep_eval_dep_gen[pr][s*nb_val_thinning+t] <= h) << std::endl;
                     
                     // Accept or not new point according to this probability.
                     if(accep_eval_dep_gen[pr][s*nb_val_thinning+t] <= h){
@@ -1138,12 +1167,12 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
 
     Eigen::VectorXd samples_mcse = mcse(samples,true);   // mcse(samples, true, "bulk", -1)
 
-    double ess_eval = ess(y_obj_leader)/nb_val_problems*nb_val_scenarios;     // ess(y_obj_leader, "bulk", -1)
-    double f_ess_eval = ess(obj_follower)/nb_val_problems*nb_val_scenarios;   // ess(obj_follower, "bulk", -1)
+    double ess_eval = ess(y_obj_leader)/(nb_val_problems*nb_val_scenarios);     // ess(y_obj_leader, "bulk", -1)
+    double f_ess_eval = ess(obj_follower)/(nb_val_problems*nb_val_scenarios);   // ess(obj_follower, "bulk", -1)
 
     Eigen::VectorXd samples_ess = ess(samples,"bulk");                               // ess(samples, "bulk", -1)
-    double min_ess_dim = samples_ess.minCoeff()/nb_val_problems*nb_val_scenarios;  
-    double max_ess_dim = samples_ess.maxCoeff()/nb_val_problems*nb_val_scenarios;
+    double min_ess_dim = samples_ess.minCoeff()/(nb_val_problems*nb_val_scenarios);  
+    double max_ess_dim = samples_ess.maxCoeff()/(nb_val_problems*nb_val_scenarios);
 
     ess_ = min_ess_dim;
 
@@ -1190,7 +1219,7 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
 
     std::cout << "--------------------------------------\n";
 
-    evaluateDepGeneralLibrary(x_,fs_,F_c,F_delta,pi_c,m,eval_behavior);
+    // evaluateDepGeneralLibrary(x_,fs_,F_c,F_delta,pi_c,m,eval_behavior);
 }
 
 void Instance::evaluateDepGeneralLibrary(const double * x_, double fs_, double F_c, double F_delta, double pi_c, double m, Input::TypesDepGeneral eval_behavior){
@@ -1217,7 +1246,7 @@ void Instance::evaluateDepGeneralLibrary(const double * x_, double fs_, double F
     Eigen::VectorXd c(bilevelmodel->nb_follower_vars);
     for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
         c(i) = m*bilevelmodel->follower_vars[i].obj_leader;
-        if(eval_behavior == Input::TypesDepGeneral::StrongFragile){
+        if(eval_behavior == Input::TypesDepGeneral::GenFragile){
             c(i) = c(i)/(F_delta);
         }
     }
@@ -1241,7 +1270,7 @@ void Instance::evaluateDepGeneralLibrary(const double * x_, double fs_, double F
         double a = pi_c + m*(-F_c);
         py::object py_model = models.attr("LinearModel")(a, c_np);
         problem = hp.attr("Problem")(A_np, b_np,"model"_a=py_model);
-    }else if(eval_behavior == Input::TypesDepGeneral::StrongFragile){
+    }else if(eval_behavior == Input::TypesDepGeneral::GenFragile){
         double a = m*(-F_c)/(F_delta);
         py::object py_model = models.attr("ExponentialModel")(a, c_np);
         problem = hp.attr("Problem")(A_np, b_np,"model"_a=py_model);

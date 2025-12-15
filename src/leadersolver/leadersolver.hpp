@@ -123,6 +123,9 @@ class SAALeaderSolver : public AbstractLeaderSolver {
         double time_lb;
         double time_eval;
 
+        double f_mean;
+        double f_var;
+
         std::vector<double> lb_vector;
         std::vector<double> ub_vector;
         std::vector<double> gap_vector;

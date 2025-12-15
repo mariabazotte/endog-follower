@@ -21,13 +21,16 @@ class Input {
             Proportional = 0,       /* Proportional. */
             Threshold = 1,          /* Threshold. */
             Strong = 2,             /* Strong or Flexible. */
-            Fragile = 3             /* Fragile or Inflexible. */
+            Fragile = 3,            /* Fragile or Inflexible. */
+            StrongPower = 4,        /* Strong or Flexible: power version. */
+            FragilePower = 5        /* Fragile or Inflexible: power version. */
         };
 
         enum TypesDepGeneral {      /* Types of General problem Decision-dependent Cooperation. */
             Neutral = 0,            /* Neutral. */
             GenProportional = 1,    /* Proportional. */
-            StrongFragile = 2       /* Strong Fragile. */
+            GenFragile = 2,         /* Fragile. */
+            GenFragilePower = 3     /* Fragile: power version. */
         };
 
         enum SolverApproach {       /* Approaches for solving the stochastic program with decision-dependent uncertainty. */
@@ -59,12 +62,15 @@ class Input {
         double threshold_param;                    /* Parameter > 0 defining slope/steepness if Decision-dependent strong-weak Threshold type.  */
         double strong_param;                       /* Parameter > 0 defining decay rate if Decision-dependent strong-weak Strong type.  */
         double fragile_param;                      /* Parameter > 0 defining growth/decay rate if Decision-dependent strong-weak Fragile type.  */
+        double strong_power_param;                 /* Parameter > 1 defining decay rate if Decision-dependent strong-weak Strong Power type.  */
+        double fragile_power_param;                /* Parameter > 1 defining growth/decay rate if Decision-dependent strong-weak Fragile Power type.  */
         int strwk_nb_pwl_intervals;                /* Number of intervals used at the PWL for the Decidion-dependent strong weak case. */
 
         // Parameters for decision-dependent general case.
         int gen_nb_intervals;                      /* Number of intervals to define cooperation cooeficient for Decision-Dependent General Proportional and Strong Fragile cases. */
         std::vector<double> gen_intervals;         /* Interval values to define cooperation coefficient. */
         std::vector<double> gen_coeff_intervals;   /* Cooperation coefficient value for each interval. */
+        double gen_max_coeff_intervals;            /* Maximum cooperation coefficient value between intervals. */
         double gen_scaling_param;                  /* Parameter > 0 defining scaling for cooperation cooeficient if Decision-dependent general Proportional and Strong Fragile cases. */
         bool gen_step_explicit;                    /* 0 -> Do not use explicit formulation for step variables. 1-> Use explicit formulation for step variables. */
         
@@ -84,19 +90,24 @@ class Input {
         double verbose;                            /* Verbose (print configuration). */
         double eps_bigm;                           /* Small value epsilon used at bigm constraints. */
 
-        int nbproblemsSAA;             /* Number of problems used in the SAA method. */
-        int nbscenariosSAA;            /* Number of scenarios for each SAA problem. */
-        int nbthinningSAA;             /* Number of thinning for each SAA problem. */
+        // SAA parameters.
+        int nbproblemsSAA;                         /* Number of problems used in the SAA method. */
+        int nbscenariosSAA;                        /* Number of scenarios for each SAA problem. */
+        int nbthinningSAA;                         /* Number of thinning for each SAA problem. */
 
-        int nbvalidateproblems;        /* Number of problems for the validation process. (markov chain monte carlo) */
-        int nbvalidatescenarios;       /* Number of scenarios for the validation process. (markov chain monte carlo) */
-        int nbvalidatethinning;        /* Number of thinning for the validation process. (markov chain monte carlo) */
+        // Evaluation parameters.
+        int nbvalidateproblems;                    /* Number of problems for the validation process. (markov chain monte carlo) */
+        int nbvalidatescenarios;                   /* Number of scenarios for the validation process. (markov chain monte carlo) */
+        int nbvalidatethinning;                    /* Number of thinning for the validation process. (markov chain monte carlo) */
 
-        bool coordinate_har;           /* 0 -> Do not use coordinate hit-and-run (use full version), 1 -> Use coordinate hit-and-run. */
+        bool coordinate_har;                       /* 0 -> Do not use coordinate hit-and-run (use full version), 1 -> Use coordinate hit-and-run. */
+        bool metropolis_hastings;                  /* 0 -> Do not use metropolis-hastings hit-and-run, 1-> Use metropolis-hastings hit-and-run. */
         
-        void defaultParams();          /* Define default values for parameters. */
-        void testParameters();         /* Test parameters value. */
-        void defineSolutionFile();     /* Define name solution file. */
+        // Auxiliar functions.
+        void defaultParams();                      /* Define default values for parameters. */
+        void testParameters();                     /* Test parameters value. */
+        void defineSolutionFile();                 /* Define name solution file. */
+        void defineGeneralIntervals();             /* Auxiliar function to define intervals for general case. */
         
     public:
         Input() { defaultParams(); }
@@ -116,11 +127,14 @@ class Input {
         double getParamThreshold() const { return threshold_param; }
         double getParamStrong() const { return strong_param; }
         double getParamFragile() const { return fragile_param; }
+        double getParamStrongPower() const { return strong_power_param; }
+        double getParamFragilePower() const { return fragile_power_param; }
         int getNbPWLIntervalsStrongWeak() const { return strwk_nb_pwl_intervals; }
         
         int getNbIntervalsGeneral() const { return gen_nb_intervals; }
-        double getGeneralIntervalValue(int i) const { return gen_intervals[i]; }
-        double getGeneralIntervalCoeff(int i) const { return gen_coeff_intervals[i]; }
+        double getIntValueGeneral(int i) const { return gen_intervals[i]; }
+        double getIntCoeffGeneral(int i) const { return gen_scaling_param*gen_coeff_intervals[i]; }
+        double getMaxIntCoeffGeneral() const { return gen_scaling_param*gen_max_coeff_intervals; }
         double getScalingGeneral() const { return gen_scaling_param; }
         bool useStepExplicitGeneral() const { return gen_step_explicit; }
 
@@ -147,19 +161,20 @@ class Input {
         int getNbValidateThinning() const { return nbvalidatethinning; }
 
         bool coordinateHitAndRun() const { return coordinate_har; }
+        bool metropolisHastings() const { return metropolis_hastings; }
 
         // Auxiliar
         std::string doubleToString(double);
 
         // Solution
-        void writeHead(std::string);     /* Write head of solution file. */
-        void write(std::string);         /* Write information of solution file. */
+        void writeHead(std::string);       /* Write head of solution file. */
+        void write(std::string);           /* Write information of solution file. */
 
         void writeHeadComp(std::string);   /* Write head of comparison file. */
         void writeComp(std::string);       /* Write information of comparison file. */
 
         // Display
-        void display();                  /* Display information. */
+        void display();                    /* Display information. */
 };
 
 std::ostream& operator<<(std::ostream&, const Input::FollowerBehavior &);

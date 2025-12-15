@@ -13,19 +13,15 @@ void Input::defaultParams(){
     threshold_param = 2.0;  // This value corresponds to the special case of softmax
     strong_param = 3.0;
     fragile_param = 3.0;
+    strong_power_param = 2.0;
+    fragile_power_param = 2.0;
     strwk_nb_pwl_intervals = 200;
 
     // Parameters for Type of Decision-Dependent General case
     gen_nb_intervals = 4;
     gen_scaling_param = 2.0;
     gen_step_explicit = true;
-    gen_intervals.resize(gen_nb_intervals+1);
-    gen_coeff_intervals.resize(gen_nb_intervals);
-    double interval = 1.0 / static_cast<double>(gen_nb_intervals);
-    for(int i = 0; i <= gen_nb_intervals; ++i){ 
-        gen_intervals[i] = i*interval;
-        if(i > 0) gen_coeff_intervals[i-1] = 0.5 - (gen_intervals[i-1]+gen_intervals[i])/2.0;
-    }
+    defineGeneralIntervals();
 
     // Problem solution
     int_solver_approach = 0;
@@ -47,6 +43,7 @@ void Input::defaultParams(){
     nbvalidatethinning = 50;
 
     coordinate_har = false;
+    metropolis_hastings = true;
 }
 
 Input::Input(int argc, char* argv[]){
@@ -86,19 +83,15 @@ Input::Input(int argc, char* argv[]){
             strong_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-frag_param")
             fragile_param = std::stod(argv[i+1]);
+        else if(std::string(argv[i]) == "-str_pow_param")
+            strong_power_param = std::stod(argv[i+1]);
+        else if(std::string(argv[i]) == "-frag_pow_param")
+            fragile_power_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-nb_intv_pwl")
             strwk_nb_pwl_intervals = std::stoi(argv[i+1]);
         else if(std::string(argv[i]) == "-nb_intv"){ // Optional :: General Decision-Dependent parameters
             gen_nb_intervals = std::stoi(argv[i+1]);
-            gen_intervals.clear();
-            gen_coeff_intervals.clear();
-            gen_intervals.resize(gen_nb_intervals+1);
-            gen_coeff_intervals.resize(gen_nb_intervals);
-            double interval = 1.0 / static_cast<double>(gen_nb_intervals);
-            for(int i = 0; i <= gen_nb_intervals; ++i){ 
-                gen_intervals[i] = i*interval;
-                if(i > 0) gen_coeff_intervals[i-1] = 0.5 - (gen_intervals[i-1]+gen_intervals[i])/2.0;
-            }
+            defineGeneralIntervals();
         }else if(std::string(argv[i]) == "-scal_param")
             gen_scaling_param = std::stod(argv[i+1]);
         else if(std::string(argv[i]) == "-expl_step")
@@ -126,6 +119,8 @@ Input::Input(int argc, char* argv[]){
             nbvalidatethinning = std::stoi(argv[i+1]);
         else if(std::string(argv[i]) == "-coord_har")
             coordinate_har = std::stoi(argv[i+1]);
+        else if(std::string(argv[i]) == "-metrop_has")
+            metropolis_hastings = std::stoi(argv[i+1]);
         else{
             std::cerr << "ERROR: Argument '" << argv[i] << "' not defined." << std::endl;
             throw std::runtime_error(std::string("Incorrect line of command"));
@@ -155,6 +150,21 @@ Input::Input(int argc, char* argv[]){
     defineSolutionFile();
 }
 
+void Input::defineGeneralIntervals(){
+    gen_intervals.resize(gen_nb_intervals+1);
+    gen_coeff_intervals.resize(gen_nb_intervals);
+    double interval = 1.0 / static_cast<double>(gen_nb_intervals);
+    for(int i = 0; i <= gen_nb_intervals; ++i) 
+        gen_intervals[i] = i*interval;
+    gen_max_coeff_intervals = 0.0;
+    for(int i = 0; i < gen_nb_intervals; ++i){
+        // gen_coeff_intervals[i] = 0.5 - (gen_intervals[i]+gen_intervals[i+1])/2.0;
+        gen_coeff_intervals[i] = 1.0 - (gen_intervals[i]+gen_intervals[i+1]);
+        gen_max_coeff_intervals = std::max(gen_max_coeff_intervals,gen_coeff_intervals[i]);
+    }
+    gen_max_coeff_intervals += 1e-4;
+}
+
 void Input::defineSolutionFile(){
     std::string instfile = instance_file;
 
@@ -181,6 +191,10 @@ void Input::defineSolutionFile(){
             solution_file += "strong/param" + doubleToString(strong_param) + "_";
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Fragile)
             solution_file += "fragile/param" + doubleToString(fragile_param) + "_";
+        if(type_dep_strongweak == Input::TypesDepStrongWeak::StrongPower)
+            solution_file += "strong_power/param" + doubleToString(strong_power_param) + "_";
+        if(type_dep_strongweak == Input::TypesDepStrongWeak::FragilePower)
+            solution_file += "fragile_power/param" + doubleToString(fragile_power_param) + "_";
     }
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         solution_file += "depgeneral/";
@@ -188,8 +202,8 @@ void Input::defineSolutionFile(){
             solution_file += "neutral/explstep" + std::to_string(gen_step_explicit) + "_";
         if(type_dep_general == Input::TypesDepGeneral::GenProportional)
             solution_file += "proportional/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
-        if(type_dep_general == Input::TypesDepGeneral::StrongFragile)
-            solution_file += "strongfragile/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+        if(type_dep_general == Input::TypesDepGeneral::GenFragile)
+            solution_file += "fragile/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
     }
 
     // Configuration corresponding to follower optimiality.
@@ -216,6 +230,7 @@ void Input::defineSolutionFile(){
                              "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
                              "_nbvalth" + std::to_string(nbvalidatethinning);
             solution_file += "_coordhar" + std::to_string(coordinate_har);
+            // solution_file += "_metrophas" + std::to_string(metropolis_hastings);
         }
     }
 
@@ -232,6 +247,7 @@ void Input::defineSolutionFile(){
                        "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
                        "_nbvalth" + std::to_string(nbvalidatethinning);
     comparison_file += "_coordhar" + std::to_string(coordinate_har);
+    comparison_file += "_metrophas" + std::to_string(metropolis_hastings);
 
     comparison_file += "_comparison.csv";
     solution_file += "_solution.csv"; 
@@ -301,6 +317,13 @@ void Input::testParameters(){
         nbthinningSAA = 0;
     }
 
+    if(is_follower_near_optimal == true){
+        if(eps_near_optimal <= (-1e-8) || eps_near_optimal >= (1.0 + 1e-8)){
+            throw std::runtime_error(std::string("Wrong value for epsilon near-optimality: it should be defined in the interval [0.0,1.0]"));
+            exit(0);
+        }
+    }
+
     // Verify parameters.
     if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Threshold){
@@ -321,7 +344,20 @@ void Input::testParameters(){
                 fragile_param = 3.0;
             }
         }
+        if(type_dep_strongweak == Input::TypesDepStrongWeak::StrongPower){
+            if(strong_power_param <= (1.0 - 1e-8)){
+                std::cout << "Strong power parameter must be > 1.0. Setting parameter to default value 2.0." << std::endl;
+                strong_power_param = 2.0;
+            }
+        }
+        if(type_dep_strongweak == Input::TypesDepStrongWeak::FragilePower){
+            if(fragile_param <= (1.0 - 1e-8)){
+                std::cout << "Fragile power parameter must be > 1.0. Setting parameter to default value 2.0." << std::endl;
+                fragile_power_param = 2.0;
+            }
+        }
     }
+
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         if(type_dep_general != Input::TypesDepGeneral::Neutral){
             if(gen_scaling_param <= -1e-8){
@@ -354,11 +390,15 @@ void Input::display(){
             std::cout << "STRONG PARAM     :  " << strong_param << std::endl;
         if(type_dep_strongweak == Input::TypesDepStrongWeak::Fragile)
             std::cout << "FRAGILE PARAM    :  " << fragile_param << std::endl;
+        if(type_dep_strongweak == Input::TypesDepStrongWeak::StrongPower)
+            std::cout << "STRONG POW PARAM :  " << strong_power_param << std::endl;
+        if(type_dep_strongweak == Input::TypesDepStrongWeak::FragilePower)
+            std::cout << "FRAGILE POW PARAM:  " << fragile_power_param << std::endl;
     }if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         std::cout << "COOPERATION TYPE :  " << type_dep_general << std::endl;
         std::cout << "EXPL STEP        :  " << gen_step_explicit << std::endl;
         if(type_dep_general == Input::TypesDepGeneral::GenProportional || 
-            type_dep_general == Input::TypesDepGeneral::StrongFragile){
+            type_dep_general == Input::TypesDepGeneral::GenFragile){
             std::cout << "NB INTERVALS     :  " << gen_nb_intervals << std::endl;
             std::cout << "SCALING PARAM    :  " << gen_scaling_param << std::endl;
         }
@@ -384,7 +424,8 @@ void Input::display(){
     std::cout << "NB VAL PROBLEMS  :  " << nbvalidateproblems << std::endl;
     std::cout << "NB VAL SCENARIOS :  " << nbvalidatescenarios << std::endl;
     std::cout << "NB VAL THINNING  :  " << nbvalidatethinning << std::endl;
-    std::cout << "COORDINATE HAR   :  " << coordinate_har << std::endl;
+    std::cout << "COORDINATE HAR.  :  " << coordinate_har << std::endl;
+    std::cout << "METROPOLIS HAS.  :  " << metropolis_hastings << std::endl;
     std::cout << "--------------------------------------" << std::endl;
 }
 
@@ -398,11 +439,13 @@ void Input::write(std::string output){
             if(type_dep_strongweak == Input::TypesDepStrongWeak::Threshold) solFile << threshold_param << ";";
             if(type_dep_strongweak == Input::TypesDepStrongWeak::Strong) solFile << strong_param << ";";
             if(type_dep_strongweak == Input::TypesDepStrongWeak::Fragile) solFile << fragile_param << ";";
+            if(type_dep_strongweak == Input::TypesDepStrongWeak::StrongPower) solFile << strong_power_param << ";";
+            if(type_dep_strongweak == Input::TypesDepStrongWeak::FragilePower) solFile << fragile_power_param << ";";
         }if(follower_behavior == Input::FollowerBehavior::DepGeneral){
             solFile << type_dep_general << ";";
             solFile << gen_step_explicit << ";";
             if(type_dep_general == Input::TypesDepGeneral::GenProportional || 
-                type_dep_general == Input::TypesDepGeneral::StrongFragile){
+                type_dep_general == Input::TypesDepGeneral::GenFragile){
                 solFile << gen_nb_intervals << ";";
                 solFile << gen_scaling_param << ";";
             }
@@ -421,6 +464,7 @@ void Input::write(std::string output){
                 solFile << nbvalidatescenarios << ";";
                 solFile << nbvalidatethinning << ";";
                 solFile << coordinate_har << ";";
+                solFile << metropolis_hastings << ";";
             }
         }
         solFile << output;
@@ -443,7 +487,7 @@ void Input::writeHead(std::string output){
         if(solver_approach == Input::SolverApproach::TR_SAA){
             solFile << "NB_SAA_PROBLEMS;NB_SAA_SCENARIOS;NB_SAA_THINNING;";
             if(follower_behavior == Input::FollowerBehavior::DepGeneral){
-                solFile << "NB_VAL_PROBLEMS;NB_VAL_SCENARIOS;NB_VAL_THINNING;COORDINATE_HAR;";
+                solFile << "NB_VAL_PROBLEMS;NB_VAL_SCENARIOS;NB_VAL_THINNING;COORDINATE_HAR;METROPOLIS_HAS;";
             }
         }
         solFile << output;
@@ -505,6 +549,14 @@ std::ostream& operator<<(std::ostream& lhs, const Input::TypesDepStrongWeak & ty
             lhs << "Fragile";
             break;
         }
+        case Input::TypesDepStrongWeak::StrongPower: {
+            lhs << "StrongPower";
+            break;
+        }
+        case Input::TypesDepStrongWeak::FragilePower: {
+            lhs << "FragilePower";
+            break;
+        }
         default :{
             lhs << "";
             break;
@@ -519,8 +571,8 @@ std::ostream& operator<<(std::ostream& lhs, const Input::TypesDepGeneral & type_
             lhs << "Proportional";
             break;
         }
-        case Input::TypesDepGeneral::StrongFragile: {
-            lhs << "StrongFragile";
+        case Input::TypesDepGeneral::GenFragile: {
+            lhs << "GenFragile";
             break;
         }
         default :{

@@ -16,9 +16,14 @@ class DepGeneralFollowerSolver : public AbstractFollowerSolver {
         GRBVar * alpha_max = NULL;
         GRBVar * q = NULL;
         GRBVar * w = NULL;
+        GRBVar * w_delta = NULL;
 
         void create(){
             defineInteriorFollower();
+            if(input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral){
+                defineAuxiliarOptimisticFollower();
+                definePessimisticFollower();
+            }
             defineLeaderObj();
         }
 
@@ -45,7 +50,7 @@ class DepGeneralFollowerSolver : public AbstractFollowerSolver {
         
         ~DepGeneralFollowerSolver() {}
 
-        void evaluate(double &, double &);
+        void evaluate(double &, double &, double &, double &);
 
         void computeStrongWeakInteriorSolutions();
 };

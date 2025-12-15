@@ -90,10 +90,10 @@ void AbstractFollowerSolver::definePrimalConstrs(GRBVar * & y, std::string v){
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void AbstractFollowerSolver::defineDualVars(GRBVar * & ds, GRBVar * & dlbs, GRBVar * & dubs, bool min_problem, bool int_problem){
+void AbstractFollowerSolver::defineDualVars(GRBVar * & ds, GRBVar * & dlbs, GRBVar * & dubs, bool min_problem, bool opt_constr, bool int_problem){
     // Dual variables.
     int nb_constrs = instance.getModel()->nb_follower_constrs;
-    if(min_problem == false) ++nb_constrs;  // Optimality or near-optimality constraint.
+    if(opt_constr == true) ++nb_constrs;   // Optimality or near-optimality constraint.
     if(int_problem == true) ++nb_constrs;   // Non-negativity of slack variable.
     
     ds = leader->getGRBModel()->addVars(nb_constrs,GRB_CONTINUOUS);
@@ -121,12 +121,16 @@ void AbstractFollowerSolver::defineDualVars(GRBVar * & ds, GRBVar * & dlbs, GRBV
             }
         }
     }
-    if(min_problem == false){ 
-        //  Maximization problem.
+    if(opt_constr == true){ 
         if(input.isFollowerNearOpt() == true){
             // Optimality constraint is <=.
-            ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_LB,0.0);
-            ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_UB,GRB_INFINITY);
+            if(min_problem == true){
+                ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_LB,-GRB_INFINITY);
+                ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_UB,0.0);
+            }else{
+                ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_LB,0.0);
+                ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_UB,GRB_INFINITY);
+            }
         }else{
             // Optimality constraint is ==. 
             ds[instance.getModel()->nb_follower_constrs].set(GRB_DoubleAttr_LB,-GRB_INFINITY);
@@ -144,7 +148,7 @@ void AbstractFollowerSolver::defineDualVars(GRBVar * & ds, GRBVar * & dlbs, GRBV
     dubs = leader->getGRBModel()->addVars(instance.getModel()->nb_follower_vars,GRB_CONTINUOUS);
 }
 
-void AbstractFollowerSolver::defineDualConstrs(GRBVar * & ds, GRBVar * & dlbs, GRBVar * & dubs, bool min_problem, bool int_problem){
+void AbstractFollowerSolver::defineDualConstrs(GRBVar * & ds, GRBVar * & dlbs, GRBVar * & dubs, bool min_problem, bool opt_constr, bool int_problem){
     // Dual constraints for primal variables.
     for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
         BilevelVariable var = instance.getModel()->follower_vars[i];
@@ -156,11 +160,11 @@ void AbstractFollowerSolver::defineDualConstrs(GRBVar * & ds, GRBVar * & dlbs, G
             expr += constr.coeffs[var.id]*ds[c];
         }
 
-        // Pessimistic and interior cases we should also consider optimality constraint.
-        if(min_problem == false) expr += var.obj_follower*ds[instance.getModel()->nb_follower_constrs];
+        // Auxiliar optimistic, pessimistic and interior cases should also consider optimality constraint.
+        if(opt_constr == true) expr += var.obj_follower*ds[instance.getModel()->nb_follower_constrs];
 
         // Optimistic problem: guarantee min objective follower.
-        if(min_problem == true){
+        if(min_problem == true && opt_constr == false){
             if(var.lb <= -instance.getModel()->inf && var.ub >= instance.getModel()->inf){
                 leader->getGRBModel()->addConstr(expr == var.obj_follower);
             }else if(var.lb <= -instance.getModel()->inf){ 
@@ -171,8 +175,22 @@ void AbstractFollowerSolver::defineDualConstrs(GRBVar * & ds, GRBVar * & dlbs, G
                 leader->getGRBModel()->addConstr(expr + dlbs[i] - dubs[i] == var.obj_follower);
             }
         }
+
+        // Auxiliar optimistic problem: guarantee min objective leader.
+        if(min_problem == true && opt_constr == true){
+            if(var.lb <= -instance.getModel()->inf && var.ub >= instance.getModel()->inf){
+                leader->getGRBModel()->addConstr(expr == var.obj_leader);
+            }else if(var.lb <= -instance.getModel()->inf){ 
+                leader->getGRBModel()->addConstr(expr - dubs[i] == var.obj_leader);
+            }else if(var.ub >= instance.getModel()->inf){
+                leader->getGRBModel()->addConstr(expr + dlbs[i] == var.obj_leader);
+            }else{
+                leader->getGRBModel()->addConstr(expr + dlbs[i] - dubs[i] == var.obj_leader);
+            }
+        }
+
         // Pessimistic problem: guarantee max objective leader.
-        if(min_problem == false && int_problem == false){
+        if(min_problem == false && opt_constr == true && int_problem == false){
             if(var.lb <= -instance.getModel()->inf && var.ub >= instance.getModel()->inf){
                 leader->getGRBModel()->addConstr(expr == var.obj_leader);
             }else if(var.lb <= -instance.getModel()->inf){ 
@@ -183,8 +201,9 @@ void AbstractFollowerSolver::defineDualConstrs(GRBVar * & ds, GRBVar * & dlbs, G
                 leader->getGRBModel()->addConstr(expr - dlbs[i] + dubs[i] == var.obj_leader);
             } 
         }
+
         // Interior problem: guarantee max slack.
-        if(min_problem == false && int_problem == true){
+        if(min_problem == false && opt_constr == true && int_problem == true){
             if(var.lb <= -instance.getModel()->inf && var.ub >= instance.getModel()->inf){ 
                 leader->getGRBModel()->addConstr(expr == 0.0);
             }else if(var.lb <= -instance.getModel()->inf){ 
@@ -196,8 +215,9 @@ void AbstractFollowerSolver::defineDualConstrs(GRBVar * & ds, GRBVar * & dlbs, G
             } 
         }
     }
+
     // Dual constraint for slack variable (si >= 0) for interior solution.
-    if(min_problem == false && int_problem == true){
+    if(min_problem == false && opt_constr == true && int_problem == true){
         GRBLinExpr expr = 0;
         for(int c = 0; c < instance.getModel()->nb_follower_constrs; ++c){
             BilevelConstraint constr = instance.getModel()->follower_constrs[c];
@@ -314,10 +334,10 @@ void AbstractFollowerSolver::defineOptimalFollower(){
     GRBVar * ds = NULL;
     GRBVar * dlbs = NULL;
     GRBVar * dubs = NULL;
-    defineDualVars(ds,dlbs,dubs,true,false);
+    defineDualVars(ds,dlbs,dubs,true,false,false);
 
     // Define dual constraints. (primal is a minimization problem)
-    defineDualConstrs(ds,dlbs,dubs,true,false);
+    defineDualConstrs(ds,dlbs,dubs,true,false,false);
 
     // Define complementarity constraints.
     defineCompConstrs(slacks,slack_lbs,slack_ubs,ds,dlbs,dubs);
@@ -372,10 +392,10 @@ void AbstractFollowerSolver::definePessimisticFollower(){
     GRBVar * ds = NULL;
     GRBVar * dlbs = NULL;
     GRBVar * dubs = NULL;
-    defineDualVars(ds,dlbs,dubs,false,false);
+    defineDualVars(ds,dlbs,dubs,false,true,false);
 
     // Define dual constraints. (primal is a maximization problem).
-    defineDualConstrs(ds,dlbs,dubs,false,false);
+    defineDualConstrs(ds,dlbs,dubs,false,true,false);
     
     // Complementarity constraints.
     defineCompConstrs(slacks,slack_lbs,slack_ubs,ds,dlbs,dubs);
@@ -390,6 +410,49 @@ void AbstractFollowerSolver::definePessimisticFollower(){
 
     // Leader objective value.
     defineLeaderObj(Fw,yw,"_pes");    
+}
+
+void AbstractFollowerSolver::defineAuxiliarOptimisticFollower(){
+    // Define primal variables.
+    GRBVar * ys_a = NULL;
+    definePrimalVars(ys_a,"_s_a");
+
+    // Define primal constraints and slacks.
+    GRBVar * slacks =  NULL;
+    GRBVar * slack_lbs = NULL;
+    GRBVar * slack_ubs = NULL;
+    definePrimalConstrs(ys_a,slacks,slack_lbs,slack_ubs,false,"_s_a");
+
+    // Define primal constraint and slack corresponding to optimality, specifically for auxiliar optimistic problem.
+    // Define it according to optimality or near optimality.
+    GRBVar slack_eps;
+    GRBVar fs_a_eps;
+    if(input.isFollowerNearOpt() == true)
+        defineFollowerNearOptimalObj(fs_a_eps,ys_a,slack_eps,"_a_s_eps");
+    else defineFollowerOptimalObj(ys_a,"_s_a");
+
+    // Define dual variables. (primal is a minimization problem).
+    GRBVar * ds = NULL;
+    GRBVar * dlbs = NULL;
+    GRBVar * dubs = NULL;
+    defineDualVars(ds,dlbs,dubs,true,true,false);
+
+    // Define dual constraints. (primal is a minimization problem).
+    defineDualConstrs(ds,dlbs,dubs,true,true,false);
+    
+    // Complementarity constraints.
+    defineCompConstrs(slacks,slack_lbs,slack_ubs,ds,dlbs,dubs);
+
+    // Complementary constraints for optimality constraint.
+    if(input.isFollowerNearOpt() == true){
+        GRBVar v[2] = {slack_eps, ds[instance.getModel()->nb_follower_constrs]};
+        double w[2] = {1.0, 2.0};
+        // Add SOS1 constraint.
+        leader->getGRBModel()->addSOS(v, w, 2, GRB_SOS_TYPE1);
+    }
+
+    // Leader objective value.
+    defineLeaderObj(Fs,ys_a,"_opt"); 
 }
 
 void AbstractFollowerSolver::defineInteriorFollower(){
@@ -417,10 +480,10 @@ void AbstractFollowerSolver::defineInteriorFollower(){
     GRBVar * ds = NULL;
     GRBVar * dlbs = NULL;
     GRBVar * dubs = NULL;
-    defineDualVars(ds,dlbs,dubs,false,true);
+    defineDualVars(ds,dlbs,dubs,false,true,true);
 
     // Define dual constraints. (primal is a maximization problem).
-    defineDualConstrs(ds,dlbs,dubs,false,true);
+    defineDualConstrs(ds,dlbs,dubs,false,true,true);
 
     // Complementarity constraints.
     defineCompConstrs(slacks,slack_lbs,slack_ubs,ds,dlbs,dubs);

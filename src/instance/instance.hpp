@@ -50,7 +50,7 @@ class Instance {
         bool polyround_transform;                      /* 0-> Do not use polyround transform for hit-and-run, 1-> Use polyround transform for hit-and-run. */
         bool polyround_transform_specific;             /* 0-> Do not use polyround transform specific (for a fixed leader decision at evaluation step only) for hit and run, 1-> Use polyround transform specific for hit-and-run. */
         bool transform_specific_executed;              /* 0-> Polyround transform specific has not been executed yet, 1-> Polyround transform specific has already been executed. */
-        bool metropolis_acceptance;                    /* */
+        bool metropolis_acceptance;                    /* 0-> Do not use metropolis-hastings for evaluation hit-and-run, 1-> Use metropolis-hastings for evalutaion hit-and-run. */
 
         Eigen::MatrixXd A_follower;                    /* Inequality constraints matrix on follower problem. (only follower variables)*/
         Eigen::VectorXd b_follower;                    /* RHS value inequality constraints on follower problem. */
@@ -169,8 +169,8 @@ class Instance {
         double getStepSizeInterval() const { return 100; }
         double getGeneralMaxProbab() const { return gen_max_probab; }
         double getGeneralMinProbab() const { return gen_min_probab; }
-        double getGeneralRefProbab() const { return gen_ref_pt_probab; }
-        double getRefLeaderObj() const { return (bilevelmodel->leader_lb + bilevelmodel->leader_ub)/2.0; }
+        // double getGeneralRefProbab() const { return gen_ref_pt_probab; }
+        // double getRefLeaderObj() const { return (bilevelmodel->leader_lb + bilevelmodel->leader_ub)/2.0; }
 
         // Getters for scenario information for strong-weak decision-dependent case.
         double getStrongWeakScenario(int pr, int s) const { return scenarios_dep_strwk[pr][s]; }

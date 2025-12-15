@@ -109,18 +109,19 @@ std::string AbstractLeaderSolver::writeComp() const {
             instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenProportional,nb_int,scal);
             writeCompDepGeneral(output,Input::TypesDepGeneral::GenProportional,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
 
-            break;
+            // break;
         }
-        break;
+        // break;
     }
+    // exit(0);
 
     // Strong Fragile 
     for(int nb_int: instance.getDepGeneralIntConfigs()){
         for(double scal: instance.getDepGeneralScalConfigs()){
-            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::StrongFragile,nb_int,scal);
-            writeCompDepGeneral(output,Input::TypesDepGeneral::StrongFragile,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenFragile,nb_int,scal);
+            writeCompDepGeneral(output,Input::TypesDepGeneral::GenFragile,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
             
-            break;
+            // break;
         }
         break;
     }
@@ -278,8 +279,11 @@ std::string LeaderSolver::write() const {
                         std::to_string(follower->getFollowerOptimalObj()) + std::string(";");
     
     if(input.isFollowerNearOpt() == true){
+        double m, v, fm, fv;
+        getFollower()->evaluate(m, v, fm, fv); // fm is the expected value of follower objective. Variance here should be zero.
         output += std::to_string(follower->getFollowerNearOptimalOptObj()) + std::string(";") +
-                  std::to_string(follower->getFollowerNearOptimalPesObj()) + std::string(";");
+                  std::to_string(follower->getFollowerNearOptimalPesObj()) + std::string(";") +
+                  std::to_string(fm) + std::string(";");
     }
     
     output += std::to_string(time_) + std::string(";") +
@@ -290,7 +294,7 @@ std::string LeaderSolver::write() const {
 std::string LeaderSolver::writeHead() const {
     std::string output = "STATUS;LB;UB;GAP;OBJ_FOLLOWER;";
     if(input.isFollowerNearOpt() == true)
-        output += "OBJ_OPT_FOLLOWER;OBJ_PES_FOLLOWER;";
+        output += "OBJ_OPT_FOLLOWER;OBJ_PES_FOLLOWER;OBJ_MEAN_FOLLOWER;";
     output += "TIME;NB_BNB;";
     return output;
 }
@@ -312,6 +316,9 @@ SAALeaderSolver::SAALeaderSolver(const Input & input, Instance & instance, std::
 
     time_lb = 0.0;
     time_eval = 0.0;
+
+    f_mean = 0.0;
+    f_var = 0.0;
                             
     lb_vector.resize(instance.getNbProblems());
     ub_vector.resize(instance.getNbProblems());
@@ -373,14 +380,17 @@ void SAALeaderSolver::estimators(){
  
 void SAALeaderSolver::testProblem(int i){
     double start_eval_time = time(NULL); 
-    double mean, variance;
-    solvers[i]->getFollower()->evaluate(mean,variance);
+    double mean, variance, follower_mean, follower_variance;
+    solvers[i]->getFollower()->evaluate(mean,variance, follower_mean, follower_variance);
     time_eval += (time(NULL) - start_eval_time);
     
     if(mean < ub){
         ub = std::min(ub, mean);
         best_problem = i;
         var_ub = variance;
+        
+        f_mean = follower_mean;
+        f_var = follower_variance;
     }
 }
 
@@ -402,7 +412,9 @@ std::string SAALeaderSolver::write() const {
 
     if(input.isFollowerNearOpt() == true){
         output += std::to_string(getFollower()->getFollowerNearOptimalOptObj()) + std::string(";") +
-                  std::to_string(getFollower()->getFollowerNearOptimalPesObj()) + std::string(";");
+                  std::to_string(getFollower()->getFollowerNearOptimalPesObj()) + std::string(";") +
+                  std::to_string(f_mean) + std::string(";") +
+                  std::to_string(f_var) + std::string(";");
     }
 
     output += std::to_string(time_) + std::string(";") +
@@ -432,7 +444,7 @@ std::string SAALeaderSolver::writeHead() const {
     }
     output += "STATUS;LB;UB;GAP;OBJ_FOLLOWER;";
     if(input.isFollowerNearOpt() == true)
-        output += "OBJ_OPT_FOLLOWER;OBJ_PES_FOLLOWER;";
+        output += "OBJ_OPT_FOLLOWER;OBJ_PES_FOLLOWER;OBJ_MEAN_FOLLOWER;OBJ_VAR_FOLLOWER;";
     output += "TIME;TIME_LB;TIME_EVAL;NB_BNB;VAR_NB_BNB;STAT_LB;STAT_UB;STAT_GAP;VAR_LB;VAR_UB;VAR_GAP;NB_NOT_OPT;";
     return output;
 }

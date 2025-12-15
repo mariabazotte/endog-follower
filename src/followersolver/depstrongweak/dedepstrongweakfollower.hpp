@@ -25,7 +25,7 @@ class DEDepStrWkFollowerSolver : public AbstractFollowerSolver {
         
         ~DEDepStrWkFollowerSolver() {}
 
-        void evaluate(double &, double &);
+        void evaluate(double &, double &, double &, double &);
 
         void computeStrongWeakInteriorSolutions();
 };

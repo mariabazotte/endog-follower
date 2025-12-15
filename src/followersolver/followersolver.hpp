@@ -51,8 +51,8 @@ class AbstractFollowerSolver {
         void definePrimalConstrs(GRBVar *&, std::string);
         
         // Define dual feasibility.
-        void defineDualVars(GRBVar *&, GRBVar *&, GRBVar *&, bool, bool);
-        void defineDualConstrs(GRBVar *&, GRBVar *&, GRBVar *&, bool, bool);
+        void defineDualVars(GRBVar *&, GRBVar *&, GRBVar *&, bool, bool, bool);
+        void defineDualConstrs(GRBVar *&, GRBVar *&, GRBVar *&, bool, bool, bool);
         
         // Define complementarity constraints.
         void defineCompConstrs(GRBVar *&, GRBVar *&, GRBVar *&, GRBVar *&, GRBVar *&, GRBVar *&);
@@ -70,6 +70,7 @@ class AbstractFollowerSolver {
         void defineOptimisticFollower();
         void definePessimisticFollower();
         void defineInteriorFollower();
+        void defineAuxiliarOptimisticFollower();
 
         // Abstract methods according to the specific follower behavior.
         virtual void create() = 0;
@@ -125,7 +126,7 @@ class AbstractFollowerSolver {
         // Function to evaluate the optimal leader solution obtained after solving
         // the problem. It either computes the true expected value (enumerates all scenarios)
         //  or uses the evaluation SAA problem depending on the follower behavior.
-        virtual void evaluate(double &, double &) = 0;
+        virtual void evaluate(double &, double &, double &, double &) = 0;
 
         // Function to compute the 
         virtual void computeStrongWeakInteriorSolutions() = 0;
