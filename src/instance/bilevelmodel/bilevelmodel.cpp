@@ -89,6 +89,9 @@ BilevelModel::BilevelModel(std::string instance_file) {
         exit(0);
     }
 
+    // Compute follower constraints bounds.
+    computeFollowerConstrsBounds();
+
     // Verify bilevel model.
     // Leader problem is not bounded: problem defining general decision-dependent case.
     if(leader_lb <= -inf || leader_ub >= inf){
@@ -101,3 +104,39 @@ BilevelModel::BilevelModel(std::string instance_file) {
         exit(0);
     }
 }
+
+void BilevelModel::computeFollowerConstrsBounds(){
+    for(int c = 0; c < nb_follower_constrs; ++c){
+        double bound = 0.0;
+        for(int i = 0; i < nb_leader_vars; ++i) {
+            if(follower_constrs[c].sense == '<'){
+                if(follower_constrs[c].coeffs[i] >= 1e-12) 
+                    bound += follower_constrs[c].coeffs[i]*leader_vars[i].lb;
+                else if(follower_constrs[c].coeffs[i] <= -1e-12) 
+                    bound += follower_constrs[c].coeffs[i]*leader_vars[i].ub;
+            }
+            if(follower_constrs[c].sense == '>'){
+                if(follower_constrs[c].coeffs[i] >= 1e-12) 
+                    bound += follower_constrs[c].coeffs[i]*leader_vars[i].ub;
+                else if(follower_constrs[c].coeffs[i] <= -1e-12) 
+                    bound += follower_constrs[c].coeffs[i]*leader_vars[i].lb;
+            }
+        }
+        for(int i = 0; i < nb_follower_vars; ++i) {
+            if(follower_constrs[c].sense == '<'){
+                if(follower_constrs[c].coeffs[nb_leader_vars+i] >= 1e-12) 
+                    bound += follower_constrs[c].coeffs[nb_leader_vars+i]*follower_vars[i].lb;
+                else if(follower_constrs[c].coeffs[nb_leader_vars+i] <= -1e-12) 
+                    bound += follower_constrs[c].coeffs[nb_leader_vars+i]*follower_vars[i].ub;
+            }
+            if(follower_constrs[c].sense == '>'){
+                if(follower_constrs[c].coeffs[nb_leader_vars+i] >= 1e-12) 
+                    bound += follower_constrs[c].coeffs[nb_leader_vars+i]*follower_vars[i].ub;
+                else if(follower_constrs[c].coeffs[nb_leader_vars+i] <= -1e-12) 
+                    bound += follower_constrs[c].coeffs[nb_leader_vars+i]*follower_vars[i].lb;
+            }
+        }
+        follower_constrs[c].bound = bound;
+    }
+}
+

@@ -121,7 +121,7 @@ class AbstractFollowerSolver {
         double getDiffEvalScenario(int s) const { return (eval_sce[s] - eval_avg); }
         
         // Function to update the optimal solution after solving problem.
-        void upd_solution();
+        virtual void upd_solution();
         
         // Function to evaluate the optimal leader solution obtained after solving
         // the problem. It either computes the true expected value (enumerates all scenarios)

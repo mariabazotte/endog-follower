@@ -41,7 +41,7 @@ class AbstractLeaderSolver {
             status = Status::Not_Solved;
         } 
 
-        virtual ~AbstractLeaderSolver() { delete env; }
+        virtual ~AbstractLeaderSolver() {}
 
         double getLB() const { return lb; }
         double getUB() const { return ub; }
@@ -96,6 +96,7 @@ class LeaderSolver : public AbstractLeaderSolver {
         GRBModel * getGRBModel() { return model; }
         GRBVar & getX(int i) { return x[i]; }
 
+        GRBVar * getX() { return x; }
         double getX_(int i) const { return x_[i]; }
         const double * getX_() const { return x_; }
         AbstractFollowerSolver * getFollower() const { return follower; }
@@ -139,6 +140,7 @@ class SAALeaderSolver : public AbstractLeaderSolver {
 
         ~SAALeaderSolver();
 
+        GRBVar * getX() const { return solvers[best_problem]->getX(); }
         double getX_(int i) const { return solvers[best_problem]->getX_(i); }
         const double * getX_() const { return solvers[best_problem]->getX_(); }
         AbstractFollowerSolver * getFollower() const { return solvers[best_problem]->getFollower(); }

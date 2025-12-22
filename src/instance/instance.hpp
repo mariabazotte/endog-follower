@@ -51,6 +51,7 @@ class Instance {
         bool polyround_transform_specific;             /* 0-> Do not use polyround transform specific (for a fixed leader decision at evaluation step only) for hit and run, 1-> Use polyround transform specific for hit-and-run. */
         bool transform_specific_executed;              /* 0-> Polyround transform specific has not been executed yet, 1-> Polyround transform specific has already been executed. */
         bool metropolis_acceptance;                    /* 0-> Do not use metropolis-hastings for evaluation hit-and-run, 1-> Use metropolis-hastings for evalutaion hit-and-run. */
+        bool eval_slice_sampling;                      /* 0-> Use inverse sampling for evaluation hit-and-run when metropolis-hastings==false, Use slice sampling*/
 
         Eigen::MatrixXd A_follower;                    /* Inequality constraints matrix on follower problem. (only follower variables)*/
         Eigen::VectorXd b_follower;                    /* RHS value inequality constraints on follower problem. */
@@ -59,11 +60,6 @@ class Instance {
         Eigen::MatrixXd nullspace;                     /* Null space matrix for equality constraints on follower problem. */
         Eigen::MatrixXd constrnorm_tr;                 /* Transformation matrix when constr_normal_transform = true. */
         Eigen::MatrixXd polyround_tr;                  /* Transformation matrix when polyround_transform = true, or polyround_transform_specific = true. */
-
-        // Parameters for General decision-dependent Proportional and Strong-Fragile.
-        double gen_min_probab;                         /* pi_min: minimum value of the function proportional to the decision-dependent probability. */
-        double gen_max_probab;                         /* pi_max: maximum value of the function proportional to the decision-dependent probability. */
-        double gen_ref_pt_probab;                      /* pi_c: reference value point of the function proportional to the decision-dependent probability. */
        
         // Scenarios for Decision-dependent strong-weak case.
         std::vector<std::vector<double>> scenarios_dep_strwk;                   /* scenarios_dep_strwk[pr][s]: inverse value of beta or cooperation level sampled from U(0,1) for transformed scenario s of the SAA problem pr. */
@@ -97,12 +93,16 @@ class Instance {
         std::vector<double> dep_strwk_thr_cg = {0.5, 2.0, 5.0, 10.0};
         std::vector<double> dep_strwk_str_cg = {0.5, 2.0, 5.0, 10.0};
         std::vector<double> dep_strwk_frg_cg = {0.5, 2.0, 5.0, 10.0};
-        std::vector<int> dep_gen_int_cg = {4, 5};
-        std::vector<double> dep_gen_scal_cg = {0.5, 2.0, 5.0, 10.0};
+        std::vector<double> dep_strwk_str_pow_cg = {2.0, 5.0, 10.0};
+        std::vector<double> dep_strwk_frg_pow_cg = {2.0, 5.0, 10.0};
+
+        std::vector<int> dep_gen_int_cg = {4, 8, 12};
+        std::vector<double> dep_gen_scal_frg_cg = {0.5, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0};
+        std::vector<double> dep_gen_scal_frg_pow_cg = {1.0, 2.0, 5.0, 10.0};
+        std::vector<double> dep_gen_scal_str_pow_cg = {1.0, 2.0, 5.0, 10.0};
 
         void defineName();                                              /* Define instance name. */
         void defineCriticalValues();                                    /* Define critical values. */
-        void defineDepGenParams();                                      /* Define auxiliar parameters for General Decision-dependent case. */
 
         void defineFollowerProblemEigenMatrix();                        /* Define Eigen matrix and vector representing the follower problem with only follower variables. */
         void computeDepGenConstrNormTransform();                        /* Function to compute transformation for follower problem based on constraint normal for hit-and-run used on General decision-dependent cases. */
@@ -128,23 +128,32 @@ class Instance {
         double computeLeaderObjFollowerVars(const double *) const;
 
         // Getter for current parameter values (F_c, pi_c, m) for evaluation general decision-dependent.
-        void computeParamsDepGeneral(double, double, double, Input::TypesDepGeneral, int, double, double &, double &, double &, double &) const;
+        void computeParamsDepGeneral(double, double, double, Input::TypesDepGeneral, int, double, double &, double &, double &, double &, double &) const;
         
         // Getters for current step/alpha min and max for evaluation general decision-dependent.
         double defineEvalMinStep(int, int, const double *, const double *, double) const;
         double defineEvalMaxStep(int, int, const double *, const double *, double) const;
+
+        double defineMinStep(int &, int, int, const double *, const double *, double) const;
+        double defineMaxStep(int &, int, int, const double *, const double *, double) const;
         
         // Getters for sampling current step/alpha final value for evaluation general decision-dependent.
-        double sampleEvalAlpha(int, int, double, double, double, double, double, double, double, Input::TypesDepGeneral) const;
+        double sampleEvalAlpha(int, int, double, double, double, double, double, double, double, double, Input::TypesDepGeneral) const;
         double sampleEvalUniformAlpha(int, int, double, double) const;
         double sampleEvalLinearAlpha(int, int, double, double, double, double) const;
         double sampleEvalExponentialAlpha(int, int, double, double, double) const;
+        double sampleEvalPowerAlpha(int, int, double, double, double, double, double) const;
+        void defineEvalSlice(int, int, double &, double &, double, double, double, double, double, double, Input::TypesDepGeneral) const;
         
+        double sampleAlpha(int, int, double, double, double, double, double, double, double, double, Input::TypesDepGeneral) const;
+        double sampleUniformAlpha(int, int, double, double) const;
+        void defineSlice(int, int, double &, double &, double, double, double, double, double, double, Input::TypesDepGeneral) const; 
+    
         // Getter for decision-dependent strong-weak probability for current follower optimal objective value.
         double getEvalDepStrongWeakProbab(double, Input::TypesDepStrongWeak, double) const;  // Return probability optimistic case for given decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
 
         // Getter for decision-dependent general probability for current follower optimal objective value.
-        double getEvalDepGeneralProb(double, double, double, double, double, Input::TypesDepGeneral) const;
+        double getEvalDepGeneralProb(double, double, double, double, double, double, Input::TypesDepGeneral) const;
 
         // Method for general library implementation for comparison.
         void evaluateDepGeneralLibrary(const double *, double, double, double, double, double, Input::TypesDepGeneral);
@@ -161,16 +170,11 @@ class Instance {
         int getNbScenarios() const { return nb_saa_scenarios*nb_saa_thinning; }
         int getNbThinning() const { return nb_saa_thinning; }
         bool chosenScenario(int s) const { return ((s+1) % nb_saa_thinning == 0) ? 1 : 0; }
-        // int getNbValidateScenarios() const { return nb_val_scenarios; }
 
         double getCriticalNormal() const { return critical_normal;}
         double getCriticalTStudent() const { return critical_tstudent;}
 
-        double getStepSizeInterval() const { return 100; }
-        double getGeneralMaxProbab() const { return gen_max_probab; }
-        double getGeneralMinProbab() const { return gen_min_probab; }
-        // double getGeneralRefProbab() const { return gen_ref_pt_probab; }
-        // double getRefLeaderObj() const { return (bilevelmodel->leader_lb + bilevelmodel->leader_ub)/2.0; }
+        double getStepSizeInterval() const { return 10; }
 
         // Getters for scenario information for strong-weak decision-dependent case.
         double getStrongWeakScenario(int pr, int s) const { return scenarios_dep_strwk[pr][s]; }
@@ -199,8 +203,12 @@ class Instance {
         const std::vector<double> & getDepStrongWeakThrConfigs() const { return dep_strwk_thr_cg; }
         const std::vector<double> & getDepStrongWeakStrConfigs() const { return dep_strwk_str_cg; }
         const std::vector<double> & getDepStrongWeakFrgConfigs() const { return dep_strwk_frg_cg; }
+        const std::vector<double> & getDepStrongWeakStrPowConfigs() const { return dep_strwk_str_pow_cg; }
+        const std::vector<double> & getDepStrongWeakFrgPowConfigs() const { return dep_strwk_frg_pow_cg; }
         const std::vector<int> & getDepGeneralIntConfigs() const { return dep_gen_int_cg; }
-        const std::vector<double> & getDepGeneralScalConfigs() const { return dep_gen_scal_cg; }
+        const std::vector<double> & getDepGeneralScalFrgConfigs() const { return dep_gen_scal_frg_cg; }
+        const std::vector<double> & getDepGeneralScalFrgPowConfigs() const { return dep_gen_scal_frg_pow_cg; }
+        const std::vector<double> & getDepGeneralScalStrPowConfigs() const { return dep_gen_scal_str_pow_cg; }
         
         // Getters for strong-weak probability for current follower optimal objective value.
         double getStrongWeakProbab(double) const;                                            // Return probability optimistic case for current decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
@@ -213,6 +221,8 @@ class Instance {
 
         // Evaluation of general decision-dependent case for current leader decision.
         void evaluateDepGeneral(double &, double &, double &, double &, double &, double &, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double);
+
+        void evaluateSAADepGeneral(double &, double *, double *, int *, double *, int *, std::vector<double*>, int, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double) const;
         
         // Display instance information.
         void display() const;

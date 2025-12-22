@@ -9,6 +9,7 @@ Instance::Instance(const Input & input): input(input), instance_file(input.getIn
     
     defineName();
     defineCriticalValues(); 
+    eval_slice_sampling = true;
 
     for(int i = 0; i < std::max(nb_saa_problems,nb_val_problems); ++i)
         rd_engine.push_back(std::mt19937(1+7919*i));
@@ -16,7 +17,6 @@ Instance::Instance(const Input & input): input(input), instance_file(input.getIn
     // Read instance.
     bilevelmodel = new BilevelModel(instance_file);
     uniform_int = std::uniform_int_distribution<int>(0,bilevelmodel->nb_follower_vars-1);
-    if(input.getFollowerBehavior() == Input::FollowerBehavior::DepGeneral) defineDepGenParams();
     defineFollowerProblemEigenMatrix();
     std::cout << "Read instance finished..." << std::endl;
     
@@ -51,21 +51,6 @@ void Instance::defineCriticalValues(){
     else if(nb_saa_problems >= 40 && nb_saa_problems <= 59) critical_tstudent = 1.68;
     else if(nb_saa_problems >= 60 && nb_saa_problems <= 79) critical_tstudent = 1.67;
     else if(nb_saa_problems >= 80 && nb_saa_problems <= 199) critical_tstudent = 1.66;
-}
-
-// TODO REMOVE PI_C
-void Instance::defineDepGenParams(){
-    double Fc = (bilevelmodel->leader_lb + bilevelmodel->leader_ub)/2.0;
-    if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenProportional){
-        double delta = (bilevelmodel->leader_ub - bilevelmodel->leader_lb)/2.0;
-        gen_ref_pt_probab = input.getMaxIntCoeffGeneral()*delta;
-        gen_min_probab = gen_ref_pt_probab - input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc);
-        gen_max_probab = gen_ref_pt_probab + input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc);
-    }if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenFragile){
-        gen_ref_pt_probab = 1.0;
-        gen_min_probab = std::exp(-input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
-        gen_max_probab = std::exp(input.getMaxIntCoeffGeneral()*(bilevelmodel->leader_ub-Fc)/(bilevelmodel->leader_ub-bilevelmodel->leader_lb));
-    }
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -332,6 +317,7 @@ void Instance::nullSpaceFollowerEqConstrs(bool evaluation = false){
         
         if(polyround_transform == true) 
             Aeq_follower_transf = Aeq_follower * polyround_tr;
+        
     }else{
         Aeq_follower_transf = Aeq_follower * polyround_tr;
     }
@@ -391,11 +377,13 @@ void Instance::generateScenarios(){
     }
 
     // Compute transformations for sampling Decision-Dependent General case.
-    if(constr_normal_transform == true) 
+    if(constr_normal_transform == true){
         computeDepGenConstrNormTransform();
+    }
 
-    if(polyround_transform == true) 
+    if(polyround_transform == true) {
         computeDepGenPolyRoundTransform(b_follower);
+    }
 
     // Compute null space for equality constraints for Decision-Dependent General case.
     if(bilevelmodel->nb_follower_eq_constrs > 0 || input.isFollowerNearOpt() == false) 
@@ -418,8 +406,10 @@ void Instance::generateScenarios(){
             dir_scenarios_dep_gen[pr].resize(nb_saa_scenarios*nb_saa_thinning);
             for(int s = 0; s < nb_saa_scenarios*nb_saa_thinning; ++s){
                 directionDepGeneralScenario(pr,dir_scenarios_dep_gen[pr][s],false);
-                step_scenarios_dep_gen[pr].push_back(uniform(rd_engine[pr]));
-                accep_scenarios_dep_gen[pr].push_back(uniform(rd_engine[pr]));
+                // step_scenarios_dep_gen[pr].push_back(uniform(rd_engine[pr]));
+                // accep_scenarios_dep_gen[pr].push_back(uniform(rd_engine[pr]));
+                step_scenarios_dep_gen[pr].push_back(std::round(uniform(rd_engine[pr])*1000.0)/1000.0);
+                accep_scenarios_dep_gen[pr].push_back(std::round(uniform(rd_engine[pr])*1000.0)/1000.0);
             }
             defineGeneralStepInfo(false,pr,coeff_obj_follower_alpha[pr],coeff_obj_leader_alpha[pr],
                                 coeff_alpha[pr],constrs_alpha[pr],bdlbs_alpha[pr],bdubs_alpha[pr]);
@@ -488,6 +478,12 @@ void Instance::directionDepGeneralScenario(int pr, std::vector<double> & dir, bo
     }else{ 
         // Full hit-and-run.
         aux = Eigen::VectorXd::NullaryExpr(bilevelmodel->nb_follower_vars, [&](){ return normal(rd_engine[pr]); }); 
+
+        if(evaluation == false){
+            for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
+                aux(i) = std::round(aux(i) * 1000.0)/1000.0;
+            }
+        }
     }  
 
     if(evaluation == false || polyround_transform_specific == false){
@@ -509,8 +505,9 @@ void Instance::directionDepGeneralScenario(int pr, std::vector<double> & dir, bo
         if(constr_normal_transform == true)
             aux = constrnorm_tr * aux;
 
-        if(polyround_transform == true)
+        if(polyround_transform == true){
             aux = polyround_tr * aux;
+        }
     }
 
     // Pass information to vector 
@@ -702,10 +699,10 @@ double Instance::getEvalDepStrongWeakProbab(double fs_, Input::TypesDepStrongWea
     }else if(eval_behavior == Input::TypesDepStrongWeak::Fragile){
         double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
         return 1.0 - (1.0 - std::exp(-param * t)) / (1.0 - std::exp(-param));
-    }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::StrongPower){
+    }else if(eval_behavior == Input::TypesDepStrongWeak::StrongPower){
         double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
         return (1.0 - std::pow(t,param));
-    }else if(input.getTypeDepStrongWeak() == Input::TypesDepStrongWeak::FragilePower){
+    }else if(eval_behavior == Input::TypesDepStrongWeak::FragilePower){
         double t = (fs_ - bilevelmodel->follower_lb) / (bilevelmodel->follower_ub - bilevelmodel->follower_lb);
         return std::pow((1.0 - t),param);
     }else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent Strong Weak Behavior."));
@@ -746,7 +743,9 @@ double Instance::defineEvalMinStep(int pr, int s, const double * x_, const doubl
             // Update alpha value.
             alpha_min = std::max(alpha_min, diff/eval_coeff_alpha[pr][s][c]);
 
-            // std::cout << "min \t" << constr.rhs << " " << value << " " << eval_coeff_alpha[pr][s][c] << " " << diff/eval_coeff_alpha[pr][s][c] << std::endl;
+            // std::cout << "min \t" << constr.rhs << " " << value << " " << 
+            //                          eval_coeff_alpha[pr][s][c] << " " << 
+            //                          diff/eval_coeff_alpha[pr][s][c] << std::endl;
         }
         // Near optimality constraint.
         else{
@@ -777,7 +776,8 @@ double Instance::defineEvalMinStep(int pr, int s, const double * x_, const doubl
             // Update alpha min.
             alpha_min = std::max(alpha_min, diff/eval_coeff_obj_follower_alpha[pr][s]);
 
-            // std::cout << "min obj\t" << ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub) << " " << value << " " << eval_coeff_obj_alpha[pr][s] << " " << diff/eval_coeff_obj_alpha[pr][s] << std::endl;
+            // std::cout << "min obj\t" << ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub) << " " << value << " " << 
+            //                             eval_coeff_obj_alpha[pr][s] << " " << diff/eval_coeff_obj_alpha[pr][s] << std::endl;
         }
     }
 
@@ -792,7 +792,8 @@ double Instance::defineEvalMinStep(int pr, int s, const double * x_, const doubl
         // Update alpha min.
         alpha_min = std::max(alpha_min, (var.lb - y_[i])/dir_eval_dep_gen[pr][s][i]);
         
-        // std::cout << "min lb\t" << var.lb << " " << y_[i] << " " << dir_eval_dep_gen[pr][s][i] << " " << (var.lb - y_[i])/dir_eval_dep_gen[pr][s][i] << std::endl;
+        // std::cout << "min lb\t" << var.lb << " " << y_[i] << " " << 
+        //               dir_eval_dep_gen[pr][s][i] << " " << (var.lb - y_[i])/dir_eval_dep_gen[pr][s][i] << std::endl;
     }
 
     // Upper bound constraints.
@@ -919,24 +920,310 @@ double Instance::defineEvalMaxStep(int pr, int s, const double * x_, const doubl
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-double Instance::sampleEvalAlpha(int pr, int s, double alpha_min, double alpha_max, double y_obj_leader, double F_c, double F_delta, double pi_c, double m, Input::TypesDepGeneral eval_behavior) const {
-    // Metropolis-Acceptance samples step (alpha) according to uniform distribution.
-    if(metropolis_acceptance == false || eval_behavior == Input::TypesDepGeneral::Neutral){
+double Instance::defineMinStep(int & j_min, int pr, int s, const double * x_, const double * y_, double fs_) const {
+    // Lower bound on step (alpha_min).
+    double alpha_min = -getStepSizeInterval();
+    j_min = getGeneralNbConstrsAlpha(pr,s,0) + getGeneralNbBdlbsAlpha(pr,s,0) + getGeneralNbBdubsAlpha(pr,s,0);
+
+    // Constraints defining alpha_min.
+    int k = 0;
+    for(int c : constrs_alpha[pr][s][0]){
+        // Usual follower constraints.
+        if(c != bilevelmodel->nb_follower_constrs){
+            BilevelConstraint constr = bilevelmodel->follower_constrs[c];
+
+            double value = 0.0;
+            for(int i = 0; i < bilevelmodel->nb_leader_vars; ++i){
+                BilevelVariable var = bilevelmodel->leader_vars[i];
+                value += constr.coeffs[var.id]*x_[i]; 
+            }
+            for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
+                BilevelVariable var = bilevelmodel->follower_vars[i];
+                value += constr.coeffs[var.id]*y_[i];
+            }
+
+            if(constr.sense == '>' && (constr.rhs - value) >= 1e-8){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+            if(constr.sense == '<' && (constr.rhs - value) <= -1e-8){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+
+            double diff = (constr.rhs - value);
+            // if(diff >= -1e-8 && diff <= 1e-8) diff = 0.0;
+
+            // Update alpha value.
+            if((diff/coeff_alpha[pr][s][c]) >= alpha_min) j_min = k;
+            alpha_min = std::max(alpha_min, diff/coeff_alpha[pr][s][c]);
+
+            // std::cout << "min \t" << constr.rhs << " " << value << " " << 
+            //                          coeff_alpha[pr][s][c] << " " << 
+            //                          diff/coeff_alpha[pr][s][c] << std::endl;
+        }
+        // Near optimality constraint.
+        else{
+            double value = 0.0;
+            for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
+                BilevelVariable var = bilevelmodel->follower_vars[i];
+                value += var.obj_follower*y_[i];
+            }
+
+            if(input.isNearOptMult() == true){
+                if(((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value) <= -1e-8){
+                    throw std::runtime_error("Constraint on near optimality was not respected by current y.");
+                }
+            }else{
+                if((fs_ + input.getEpsNearOpt()*(bilevelmodel->follower_ub - bilevelmodel->follower_lb) - value) <= -1e-8){
+                    throw std::runtime_error("Constraint on near optimality was not respected by current y.");
+                }
+            }
+
+            double diff = 0.0;
+            if(input.isNearOptMult() == true){
+                diff = ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value);
+            }else{
+                diff = (fs_ + input.getEpsNearOpt()*(bilevelmodel->follower_ub - bilevelmodel->follower_lb) - value);
+            }
+            // if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha min.
+            if(diff/coeff_obj_follower_alpha[pr][s] >= alpha_min) j_min = k;
+            alpha_min = std::max(alpha_min, diff/coeff_obj_follower_alpha[pr][s]);
+
+            // std::cout << "min obj\t" << ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub) << " " << value << " " << 
+            //                             coeff_obj_alpha[pr][s] << " " << diff/coeff_obj_alpha[pr][s] << std::endl;
+        }
+        ++k;
+    }
+
+    // Lower bound constraints.
+    for(int i: bdlbs_alpha[pr][s][0]){
+        BilevelVariable var = bilevelmodel->follower_vars[i];
+
+        if((var.lb - y_[i]) >= 1e-8){
+            throw std::runtime_error("Lower bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+        
+        // Update alpha min.
+        if((var.lb - y_[i])/dir_scenarios_dep_gen[pr][s][i] >= alpha_min) j_min = k;
+        alpha_min = std::max(alpha_min, (var.lb - y_[i])/dir_scenarios_dep_gen[pr][s][i]);
+        
+        // std::cout << "min lb\t" << var.lb << " " << y_[i] << " " << 
+        //              dir_scenarios_dep_gen[pr][s][i] << " " << (var.lb - y_[i])/dir_scenarios_dep_gen[pr][s][i] << std::endl;
+        ++k;
+    }
+
+    // Upper bound constraints.
+    for(int i: bdubs_alpha[pr][s][0]){
+        BilevelVariable var = bilevelmodel->follower_vars[i];
+
+        if((var.ub - y_[i]) <= -1e-8){
+            throw std::runtime_error("Upper bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+
+        // Update alpha min.
+        if((var.ub - y_[i])/dir_scenarios_dep_gen[pr][s][i] >= alpha_min) j_min = k;
+        alpha_min = std::max(alpha_min, (var.ub - y_[i])/dir_scenarios_dep_gen[pr][s][i]);
+        
+        // std::cout << "min ub\t" << var.ub << " " << y_[i] << " " << 
+        //              dir_scenarios_dep_gen[pr][s][i] << " " << (var.ub - y_[i])/dir_scenarios_dep_gen[pr][s][i] << std::endl;
+        ++k;
+    }
+
+    if(alpha_min >= 1e-8) {
+        throw std::runtime_error(std::string("Incorrect min step value: Infeasible current point."));
+    }
+
+    alpha_min = std::min(alpha_min, 0.0);
+
+    return alpha_min;
+}
+
+double Instance::defineMaxStep(int & j_max, int pr, int s, const double * x_, const double * y_, double fs_) const {
+    // Upper bound on step (alpha_max).
+    double alpha_max = getStepSizeInterval();
+    j_max = getGeneralNbConstrsAlpha(pr,s,1) + getGeneralNbBdlbsAlpha(pr,s,1) + getGeneralNbBdubsAlpha(pr,s,1);
+
+    int k = 0;
+    // Constraints defining alpha_max.
+    for(int c : constrs_alpha[pr][s][1]){
+        // Usual follower constraints.
+        if(c != bilevelmodel->nb_follower_constrs){
+            BilevelConstraint constr = bilevelmodel->follower_constrs[c];
+
+            double value = 0.0;
+            for(int i = 0; i < bilevelmodel->nb_leader_vars; ++i){
+                BilevelVariable var = bilevelmodel->leader_vars[i];
+                value += constr.coeffs[var.id]*x_[i]; 
+            }
+            for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
+                BilevelVariable var = bilevelmodel->follower_vars[i];
+                value += constr.coeffs[var.id]*y_[i];
+            }
+
+            if(constr.sense == '>' && (constr.rhs - value) >= 1e-8){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+            if(constr.sense == '<' && (constr.rhs - value) <= -1e-8){
+                throw std::runtime_error("Constraint " + std::to_string(c) + " was not respected by current y.");
+            }
+
+            double diff = (constr.rhs - value);
+            // if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha max.
+            if((diff/coeff_alpha[pr][s][c]) <= alpha_max) j_max = k;
+            alpha_max = std::min(alpha_max, diff/coeff_alpha[pr][s][c]);
+
+            // std::cout << "max \t" << constr.rhs << " " << value << " " << 
+            //              coeff_alpha[pr][s][c] << " " << diff/coeff_alpha[pr][s][c] << std::endl;
+        }
+        // Near optimality constraint.
+        else{
+            double value = 0.0;
+            for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
+                BilevelVariable var = bilevelmodel->follower_vars[i];
+                value += var.obj_follower*y_[i];
+            }
+
+            if(input.isNearOptMult() == true){
+                if(((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value) <= -1e-8){
+                    throw std::runtime_error("Constraint on near optimality was not respected by current y.");
+                }
+            }else{
+                if((fs_ + input.getEpsNearOpt()*(bilevelmodel->follower_ub - bilevelmodel->follower_lb) - value) <= -1e-8){
+                    throw std::runtime_error("Constraint on near optimality was not respected by current y.");
+                }
+            }
+
+            double diff = 0.0;
+            if(input.isNearOptMult() == true){
+                diff = ((1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub - value);
+            }else{
+                diff = (fs_ + input.getEpsNearOpt()*(bilevelmodel->follower_ub - bilevelmodel->follower_lb) - value);
+            }
+            // if(diff >= -1e-6 && diff <= 1e-6) diff = 0.0;
+
+            // Update alpha_max value.
+            if((diff/coeff_obj_follower_alpha[pr][s]) <= alpha_max) j_max = k;
+            alpha_max = std::min(alpha_max, diff/coeff_obj_follower_alpha[pr][s]);
+
+            // std::cout << "max obj\t" << (1.0 - input.getEpsNearOpt())*fs_ + input.getEpsNearOpt()*bilevelmodel->follower_ub << " " << value << " " << 
+            //              coeff_obj_alpha[pr][s] << " " << diff/coeff_obj_alpha[pr][s] << std::endl;
+        }
+        ++k;
+    }
+
+    // Lower bound constraints.
+    for(int i: bdlbs_alpha[pr][s][1]){
+        BilevelVariable var = bilevelmodel->follower_vars[i];
+
+        if((var.lb - y_[i]) >= 1e-8){
+            throw std::runtime_error("Lower bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+
+        // Update alpha max.
+        if(((var.lb - y_[i])/dir_scenarios_dep_gen[pr][s][i]) <= alpha_max) j_max = k;
+        alpha_max = std::min(alpha_max, (var.lb - y_[i])/dir_scenarios_dep_gen[pr][s][i]);
+
+        // std::cout << "max lb\t" << var.lb << " " << y_[i] << " " << 
+        //              dir_scenarios_dep_gen[pr][s][i] << " " << (var.lb - y_[i])/dir_scenarios_dep_gen[pr][s][i] << std::endl;
+        ++k;
+    }
+
+    // Upper bound constraints.
+    for(int i: bdubs_alpha[pr][s][1]){
+        BilevelVariable var = bilevelmodel->follower_vars[i];
+
+        if((var.ub - y_[i]) <= -1e-8){
+            throw std::runtime_error("Upper bound constraint " + std::to_string(i) + " was not respected by current y.");
+        }
+
+        // Define alpha max.
+        if(((var.ub - y_[i])/dir_scenarios_dep_gen[pr][s][i]) <= alpha_max) j_max = k;
+        alpha_max = std::min(alpha_max, (var.ub - y_[i])/dir_scenarios_dep_gen[pr][s][i]);
+
+        // std::cout << "max ub\t" << var.ub << " " << y_[i] << " " << 
+        //              dir_scenarios_dep_gen[pr][s][i] << " " << (var.ub - y_[i])/dir_scenarios_dep_gen[pr][s][i] << std::endl;
+        ++k;
+    }
+
+    if(alpha_max <= -1e-8) throw std::runtime_error(std::string("Incorrect max step value: Infeasible current point."));
+    
+    alpha_max = std::max(alpha_max, 0.0);
+    
+    return alpha_max;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+double Instance::sampleEvalAlpha(int pr, int s, double alpha_min, double alpha_max, double y_obj_leader, double F_c, double F_delta, double pi_c, double m, double p, Input::TypesDepGeneral eval_behavior) const {
+    if(metropolis_acceptance == true){ // Use metropolis hastings in evaluation.
         return sampleEvalUniformAlpha(pr, s, alpha_min, alpha_max);
     }
-    else if(eval_behavior == Input::TypesDepGeneral::GenProportional){
-        double A = pi_c + m*(y_obj_leader - F_c);
-        double B = m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data());
+    else if(eval_behavior == Input::TypesDepGeneral::Neutral){
+        return sampleEvalUniformAlpha(pr, s, alpha_min, alpha_max);
+    }
+    else if(eval_slice_sampling == true){ // Use slice sampling in evaluation.
+        defineEvalSlice(pr, s, alpha_min, alpha_max, y_obj_leader, F_c, F_delta, pi_c, m, p, eval_behavior);
+        return sampleEvalUniformAlpha(pr, s, alpha_min, alpha_max);
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::GenProportional){ // Use inverse sampling in evaluation.
+        double A = pi_c + m*(y_obj_leader - F_c)/(F_delta);
+        double B = m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data())/(F_delta);
         return sampleEvalLinearAlpha(pr, s, alpha_min, alpha_max, A, B);
     }
     else if(eval_behavior == Input::TypesDepGeneral::GenFragile){
         double k = (m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data()))/(F_delta);
         return sampleEvalExponentialAlpha(pr, s, alpha_min, alpha_max, k);
     }
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragilePower){
+        int signal = (m <= -1e-12) ? -1 : 1;
+        double c0 = 1.0/2.0 + signal * (y_obj_leader - F_c)/(F_delta);
+        double c1 = signal * computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data())/(F_delta);
+        return sampleEvalPowerAlpha(pr, s, alpha_min, alpha_max, c0, c1, p);
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::GenStrongPower){
+        int signal = (m <= -1e-12) ? -1 : 1;
+        double c0 = 1.0/2.0 + signal * (y_obj_leader - F_c)/(F_delta);
+        double c1 = signal * computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data())/(F_delta);
+        return sampleEvalPowerAlpha(pr, s, alpha_min, alpha_max, c0, c1, p);
+    }
     else{
         throw std::runtime_error("Wrong option on Type for General Decision-dependent case.");
         exit(0);
     }
+}
+
+void Instance::defineEvalSlice(int pr, int s, double & alpha_min, double & alpha_max, double y_obj_leader, double F_c, double F_delta, double pi_c, double m, double p, Input::TypesDepGeneral eval_behavior) const {
+    if(eval_behavior == Input::TypesDepGeneral::GenProportional){
+        double A = pi_c + (m*(y_obj_leader - F_c))/(F_delta);
+        double B = (m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data()))/(F_delta);
+
+        if(B >= 1e-12) alpha_min = std::max(alpha_min, ((accep_eval_dep_gen[pr][s] - 1.0)*A)/(B));
+        else if(B <= -1e-12) alpha_max = std::min(alpha_max, ((accep_eval_dep_gen[pr][s] - 1.0)*A)/(B));
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragile){
+        double B = (m*computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data()))/(F_delta);
+
+        if(B >= 1e-12) alpha_min = std::max(alpha_min, std::log(accep_eval_dep_gen[pr][s])/(B));
+        else if(B <= -1e-12) alpha_max = std::min(alpha_max, std::log(accep_eval_dep_gen[pr][s])/(B));
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragilePower || eval_behavior == Input::TypesDepGeneral::GenStrongPower){
+        double A = 0.0;
+        double B = 0.0;
+        if(m <= -1e-12){
+            A = 0.5 - (y_obj_leader - F_c)/(F_delta);
+            B = (-computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data()))/(F_delta);
+        }else{
+            A = 0.5 + (y_obj_leader - F_c)/(F_delta);
+            B = (+computeLeaderObjFollowerVars(dir_eval_dep_gen[pr][s].data()))/(F_delta);
+        }
+
+        if(B >= 1e-12) alpha_min = std::max(alpha_min, ((std::pow(accep_eval_dep_gen[pr][s], 1.0/p) - 1.0)*A)/(B));
+        else if(B <= -1e-12) alpha_max = std::min(alpha_max, ((std::pow(accep_eval_dep_gen[pr][s], 1.0/p) - 1.0)*A)/(B));
+    }
+    else throw std::runtime_error("Wrong option on Type for General Decision-dependent case for slice sampling.");
 }
 
 double Instance::sampleEvalUniformAlpha(int pr, int s, double alpha_min, double alpha_max) const {
@@ -947,7 +1234,7 @@ double Instance::sampleEvalLinearAlpha(int pr, int s, double alpha_min, double a
     if (B == 0) return alpha_min + step_eval_dep_gen[pr][s] * (alpha_max - alpha_min);
 
     double denom = A * (alpha_max - alpha_min) + 0.5 * B * (alpha_max*alpha_max - alpha_min*alpha_min);
-    double discrim = A*A + 2*B*(0.5 * B * alpha_min * alpha_min + A * alpha_min + step_eval_dep_gen[pr][s] * denom);
+    double discrim = A*A + 2.0*B*(0.5 * B * alpha_min * alpha_min + A * alpha_min + step_eval_dep_gen[pr][s] * denom);
 
     if (discrim < 0) throw std::runtime_error("Negative discriminant in linear sampling");
 
@@ -969,17 +1256,71 @@ double Instance::sampleEvalExponentialAlpha(int pr, int s, double alpha_min, dou
     return std::log(step_eval_dep_gen[pr][s] * (exp_max - exp_min) + exp_min) / k;
 }
 
+double Instance::sampleEvalPowerAlpha(int pr, int s, double alpha_min, double alpha_max, double c0, double c1, double p) const {
+    double g_min = c0 + c1*alpha_min;
+    double g_max = c0 + c1*alpha_max;
+    return (std::pow((std::pow(g_min,p+1.0) + step_eval_dep_gen[pr][s] * ( std::pow(g_max,p+1.0) - std::pow(g_min,p+1.0))), 1.0/(p+1.0)) - c0)/c1;
+}
+
 ////////////////////////////////////////////////////////////////////////////////////////////////
 
-double Instance::getEvalDepGeneralProb(double y_obj_leader, double F_c, double F_delta, double pi_c, double m, Input::TypesDepGeneral eval_behavior) const {
-    // if(eval_behavior == Input::TypesDepGeneral::GenProportional)
-    //     std::cout << "Proportional: " << (pi_c + m*(y_obj_leader - F_c)) << std::endl;
-    // if(eval_behavior == Input::TypesDepGeneral::GenFragile)
-    //     std::cout << "Strong-Fragile: " << (pi_c*std::exp(m*(y_obj_leader - F_c)/(F_delta))) << std::endl;
+double Instance::sampleAlpha(int pr, int s, double alpha_min, double alpha_max, double y_obj_leader, double F_c, double F_delta, double pi_c, double m, double p, Input::TypesDepGeneral eval_behavior) const {
+    if(metropolis_acceptance == true){ // Use metropolis hastings.
+        return sampleUniformAlpha(pr, s, alpha_min, alpha_max);
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::Neutral){
+        return sampleUniformAlpha(pr, s, alpha_min, alpha_max);
+    }
+    else { // Only slice sampling available.
+        defineSlice(pr, s, alpha_min, alpha_max, y_obj_leader, F_c, F_delta, pi_c, m, p, eval_behavior);
+        return sampleUniformAlpha(pr, s, alpha_min, alpha_max);
+    }
+}
 
-    if(eval_behavior == Input::TypesDepGeneral::GenProportional) return (pi_c + m*(y_obj_leader - F_c));
+double Instance::sampleUniformAlpha(int pr, int s, double alpha_min, double alpha_max) const {
+    return alpha_min + step_scenarios_dep_gen[pr][s] * (alpha_max - alpha_min);
+}
+
+void Instance::defineSlice(int pr, int s, double & alpha_min, double & alpha_max, double y_obj_leader, double F_c, double F_delta, double pi_c, double m, double p, Input::TypesDepGeneral eval_behavior) const {
+    if(eval_behavior == Input::TypesDepGeneral::GenProportional){
+        double A = pi_c + (m*(y_obj_leader - F_c))/(F_delta);
+        double B = (m*computeLeaderObjFollowerVars(dir_scenarios_dep_gen[pr][s].data()))/(F_delta);
+
+        if(B >= 1e-12) alpha_min = std::max(alpha_min, ((accep_scenarios_dep_gen[pr][s] - 1.0)*A)/(B));
+        else if(B <= -1e-12) alpha_max = std::min(alpha_max, ((accep_scenarios_dep_gen[pr][s] - 1.0)*A)/(B));
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragile){
+        double B = (m*computeLeaderObjFollowerVars(dir_scenarios_dep_gen[pr][s].data()))/(F_delta);
+
+        if(B >= 1e-12) alpha_min = std::max(alpha_min, std::log(accep_scenarios_dep_gen[pr][s])/(B));
+        else if(B <= -1e-12) alpha_max = std::min(alpha_max, std::log(accep_scenarios_dep_gen[pr][s])/(B));
+    }
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragilePower || eval_behavior == Input::TypesDepGeneral::GenStrongPower){
+        double A = 0.0;
+        double B = 0.0;
+        if(m <= -1e-12){
+            A = 0.5 - (y_obj_leader - F_c)/(F_delta);
+            B = (-computeLeaderObjFollowerVars(dir_scenarios_dep_gen[pr][s].data()))/(F_delta);
+        }else{
+            A = 0.5 + (y_obj_leader - F_c)/(F_delta);
+            B = (+computeLeaderObjFollowerVars(dir_scenarios_dep_gen[pr][s].data()))/(F_delta);
+        }
+
+        if(B >= 1e-12) alpha_min = std::max(alpha_min, ((std::pow(accep_scenarios_dep_gen[pr][s], 1.0/p) - 1.0)*A)/(B));
+        else if(B <= -1e-12) alpha_max = std::min(alpha_max, ((std::pow(accep_scenarios_dep_gen[pr][s], 1.0/p) - 1.0)*A)/(B));
+    }
+    else throw std::runtime_error("Wrong option on Type for General Decision-dependent case for slice sampling.");
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+double Instance::getEvalDepGeneralProb(double y_obj_leader, double F_c, double F_delta, double pi_c, double m, double p, Input::TypesDepGeneral eval_behavior) const {
+    if(eval_behavior == Input::TypesDepGeneral::GenProportional) return (pi_c + m*(y_obj_leader - F_c)/(F_delta));
     else if(eval_behavior == Input::TypesDepGeneral::GenFragile) return (pi_c*std::exp(m*(y_obj_leader - F_c)/(F_delta)));
-    else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent General Behavior."));
+    else if(eval_behavior == Input::TypesDepGeneral::GenFragilePower || eval_behavior == Input::TypesDepGeneral::GenStrongPower)  {
+        if(m <= -1e-12) return (pi_c * std::pow((1.0/2.0 - (y_obj_leader - F_c)/(F_delta)), p));
+        else return (pi_c * std::pow((1.0/2.0 + (y_obj_leader - F_c)/(F_delta)), p));
+    }else throw std::runtime_error(std::string("Incorrect choice of Decision-Dependent General Behavior."));
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1008,7 +1349,22 @@ double Instance::computeFollowerObj(const double * y_) const {
     return obj_follower;
 }
 
-void Instance::computeParamsDepGeneral(double Fs_, double Fw_, double fs_, Input::TypesDepGeneral eval_behavior, int nb_int, double scaling, double & F_c, double & F_delta, double & pi_c, double & m) const {
+void Instance::computeParamsDepGeneral(double Fs_, double Fw_, double fs_, Input::TypesDepGeneral eval_behavior, int nb_int, double scaling, double & F_c, double & F_delta, double & pi_c, double & m, double & p) const {
+    if(nb_int <= 0) 
+        throw std::invalid_argument("Number of intervals should be > 0.");
+    if(eval_behavior == Input::TypesDepGeneral::GenProportional){
+        if(scaling <= (1.0 - 1e-8) || scaling >= (1.0 + 1e-8))
+            throw std::invalid_argument("Scaling parameter for proportional case should be = 1.");
+    }
+    if(eval_behavior == Input::TypesDepGeneral::GenFragile || eval_behavior == Input::TypesDepGeneral::GenFragilePower ){
+        if(scaling <= (- 1e-8))
+            throw std::invalid_argument("Scaling parameter for fragile case should be > 0.");
+    }
+    if(eval_behavior == Input::TypesDepGeneral::GenStrongPower ){
+        if(scaling <= (1.0 - 1e-8))
+            throw std::invalid_argument("Scaling parameter for strong case should be >= 1.0.");
+    }
+
     // Centering point for leader objective and probability.
     F_c = (Fs_ + Fw_)/2.0;
     F_delta = Fw_ - Fs_;
@@ -1020,17 +1376,27 @@ void Instance::computeParamsDepGeneral(double Fs_, double Fw_, double fs_, Input
     int i = std::min(static_cast<int>(fs_prop / interval), nb_int - 1);
     m = scaling * (1.0 - 2.0*((i + 0.5) * interval));
 
-    std::cout << "fsp:" << fs_prop << " int:" << interval << std::endl;
-    std::cout << "i:" << i << std::endl;
+    // Probability centering point and power value.
+    p = 0;
+    if(eval_behavior == Input::TypesDepGeneral::GenFragile){
+        pi_c = 1.0/std::exp((std::abs(m)/2.0));
+    }
 
-    // Probability centering point.
-    pi_c = 1.0;
+    if(eval_behavior == Input::TypesDepGeneral::GenFragilePower){
+        pi_c = 1.0;
+        p = 1.0 + std::abs(m);
+    }
+
+    if(eval_behavior == Input::TypesDepGeneral::GenStrongPower){
+        pi_c = 1.0;
+        p = std::max(1e-8, std::abs(m/(scaling*scaling)));
+    }
+ 
     if(eval_behavior == Input::TypesDepGeneral::GenProportional) {
         double max_m = 0.0;
         for(int ii = 0; ii < nb_int; ++ ii) 
-            max_m = std::max(max_m, (scaling * (1.0 - 2.0*((ii + 0.5) * interval))) );
-        std::cout << "max m:" << max_m << std::endl;
-        pi_c = (max_m + 1e-8)*((Fw_ - Fs_)/2.0);  // Include small epsilon 1e-4 to avoid probability zero.
+            max_m = std::max(max_m, (scaling * (1.0 - 2.0*((ii + 0.5) * interval))) );   
+        pi_c = (max_m + 1e-8)/2.0;  // Include small epsilon 1e-4 to avoid probability zero.
     }
 }
 
@@ -1059,15 +1425,15 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
                                   const double * x_, const double * y_, 
                                   double Fs_, double Fw_, double fs_, 
                                   Input::TypesDepGeneral eval_behavior, int nb_int, double scaling) {
-
+    
     // Apply specific polyround transformation for leader decision x_ if necessary.
     if(polyround_transform_specific == true && transform_specific_executed == false) 
         updInfoEvaluateDepGeneral(x_,fs_);
 
     // Compute parameters for current evaluation.
-    double F_c, F_delta, pi_c, m;
-    computeParamsDepGeneral(Fs_,Fw_,fs_,eval_behavior,nb_int,scaling,F_c,F_delta,pi_c,m);
-    std::cout  << "Fc: " << F_c << " Fdelta: " << F_delta << " pi_c: " << pi_c << " m: " << m << std::endl;
+    double F_c, F_delta, pi_c, m, p;
+    if(eval_behavior != Input::TypesDepGeneral::Neutral)
+        computeParamsDepGeneral(Fs_,Fw_,fs_,eval_behavior,nb_int,scaling,F_c,F_delta,pi_c,m,p);
 
     // Initialize samples.
     std::vector<Eigen::MatrixXd> samples(nb_val_problems);
@@ -1101,15 +1467,16 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
                 // Computing alpha_min and alpha_max.
                 double alpha_min = defineEvalMinStep(pr,(s*nb_val_thinning+t),x_,current_sample.data(),fs_);
                 double alpha_max = defineEvalMaxStep(pr,(s*nb_val_thinning+t),x_,current_sample.data(),fs_);
-
+                // std::cout << alpha_min << " " << alpha_max << "\n";
+                
                 // Sampling alpha according to appropriate distribution. (only consider leader objective with respect to follower variables).
-                double alpha = sampleEvalAlpha(pr,(s*nb_val_thinning+t),alpha_min,alpha_max,computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,eval_behavior);
+                double alpha = sampleEvalAlpha(pr,(s*nb_val_thinning+t),alpha_min,alpha_max,computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,p,eval_behavior);
 
-                // std::cout << s << " " << t << ": alpha bound: " << alpha_min << " " << alpha_max << std::endl;
-                // std::cout << s << " " << t << ": alpha value: " << alpha << std::endl;
-
-                if(metropolis_acceptance == false || eval_behavior == Input::TypesDepGeneral::Neutral){
+                if(metropolis_acceptance == false){
                     // New point is always accepted.
+                    for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i) 
+                        current_sample(i) = current_sample(i) + alpha*dir_eval_dep_gen[pr][s*nb_val_thinning+t][i];
+                }else if(eval_behavior == Input::TypesDepGeneral::Neutral){
                     for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i) 
                         current_sample(i) = current_sample(i) + alpha*dir_eval_dep_gen[pr][s*nb_val_thinning+t][i];
                 }else{
@@ -1119,13 +1486,12 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
                         test(i) = current_sample(i) + alpha*dir_eval_dep_gen[pr][s*nb_val_thinning+t][i];
 
                     // Compute probability to accept new point. (only consider leader objective with respect to follower variables).
-                    double h = getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,eval_behavior)/
-                               getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,eval_behavior);
+                    double h = getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,p,eval_behavior)/
+                               getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,p,eval_behavior);
 
-                    // std::cout << s << ": Leader obj current: " << computeLeaderObjFollowerVars(current_sample.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,eval_behavior) << std::endl;
-                    // std::cout << s << ": Leader obj test: " << computeLeaderObjFollowerVars(test.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,eval_behavior) << std::endl;
-                    // std::cout << s << ": Possible acceptance: " << (computeLeaderObjFollowerVars(test.data())-Fs_)/(computeLeaderObjFollowerVars(current_sample.data())-Fs_) << std::endl;
-                    // std::cout << s << ": Acceptance: " << accep_eval_dep_gen[pr][s*nb_val_thinning+t] << " " << h << " " <<  (accep_eval_dep_gen[pr][s*nb_val_thinning+t] <= h) << std::endl;
+                    // std::cout << s << ": Leader obj current: " << computeLeaderObjFollowerVars(current_sample.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,p,eval_behavior) << std::endl;
+                    // std::cout << s << ": Leader obj test   : " << computeLeaderObjFollowerVars(test.data()) << " " << getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,p,eval_behavior) << std::endl;
+                    // std::cout << s << ": Acceptance        : " << accep_eval_dep_gen[pr][s*nb_val_thinning+t] << " " << h << std::endl;
                     
                     // Accept or not new point according to this probability.
                     if(accep_eval_dep_gen[pr][s*nb_val_thinning+t] <= h){
@@ -1143,9 +1509,6 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
             // Compute leader and follower objective from this scenario.
             y_obj_leader[pr](s) = computeLeaderObjFollowerVars(current_sample.data());
             obj_follower[pr](s) = computeFollowerObj(current_sample.data());
-
-            // std::cout << s << ": Leader obj: " << y_obj_leader[pr](s) << std::endl;
-            // std::cout << s << ": Follower obj: " << obj_follower[pr](s) << std::endl;
         }
 
         // Metropolis acceptance.
@@ -1165,62 +1528,111 @@ void Instance::evaluateDepGeneral(double & eval, double & var_eval,
     var_eval = mcse(y_obj_leader, true);                 // mcse(y_obj_leader, true, "bulk", -1)
     f_var_eval = mcse(obj_follower, true);               // mcse(obj_follower, true, "bulk", -1)
 
-    Eigen::VectorXd samples_mcse = mcse(samples,true);   // mcse(samples, true, "bulk", -1)
+    Eigen::VectorXd samples_ess = ess(samples,"bulk");   // ess(samples, "bulk", -1)
+    ess_ = samples_ess.minCoeff()/(nb_val_problems*nb_val_scenarios);  
 
+    Eigen::VectorXd samples_rhat = rhat(samples);
+    rhat_ = samples_rhat.maxCoeff();
+
+    Eigen::VectorXd samples_mcse = mcse(samples,true);   // mcse(samples, true, "bulk", -1)
     double ess_eval = ess(y_obj_leader)/(nb_val_problems*nb_val_scenarios);     // ess(y_obj_leader, "bulk", -1)
     double f_ess_eval = ess(obj_follower)/(nb_val_problems*nb_val_scenarios);   // ess(obj_follower, "bulk", -1)
 
-    Eigen::VectorXd samples_ess = ess(samples,"bulk");                               // ess(samples, "bulk", -1)
-    double min_ess_dim = samples_ess.minCoeff()/(nb_val_problems*nb_val_scenarios);  
-    double max_ess_dim = samples_ess.maxCoeff()/(nb_val_problems*nb_val_scenarios);
-
-    ess_ = min_ess_dim;
-
-    Eigen::VectorXd samples_rhat = rhat(samples);
-
-    rhat_ = 0.0;
-    for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i) 
-        rhat_ += std::pow(samples_rhat(i),2);
-    rhat_ = std::sqrt(rhat_);
-
     // Print.
-    std::cout << "Metropolis acceptance: " << mean_acceptance << std::endl;
+    if(input.getVerbose() >= 1){
+        std::cout << "--------------------------------------\n";
+        std::cout << "Metropolis acceptance: " << mean_acceptance << std::endl;
 
-    std::cout << "Effective Sample Size (per dimension):\n" << samples_ess.transpose() << "\n\n";
-    std::cout << "Effective Sample Size (follower):\n" << ess(obj_follower) << "\n\n";
-    std::cout << "Effective Sample Size (leader):\n" << ess(y_obj_leader) << "\n\n";
+        std::cout << "Effective Sample Size (per dimension):\n" << samples_ess.transpose() << "\n\n";
+        std::cout << "Effective Sample Size (follower):\n" << ess_eval << "\n\n";
+        std::cout << "Effective Sample Size (leader):\n" << f_ess_eval << "\n\n";
 
-    std::cout << "Markov Chain Variance (per dimension):\n" << samples_mcse.transpose() << "\n\n";
-    std::cout << "Markov Chain Variance (follower):\n" << f_var_eval << "\n\n";
-    std::cout << "Markov Chain Variance (leader):\n" << var_eval << "\n\n";
+        std::cout << "Markov Chain Variance (per dimension):\n" << samples_mcse.transpose() << "\n\n";
+        std::cout << "Markov Chain Variance (follower):\n" << f_var_eval << "\n\n";
+        std::cout << "Markov Chain Variance (leader):\n" << var_eval << "\n\n";
 
-    std::cout << "R-hat (per dimension):\n" << samples_rhat.transpose() << "\n\n"; 
-
-    // Testing with baseline computation.
-    py::module np = py::module::import("numpy");
-    py::module hp  = py::module::import("hopsy");
-
-    // Convert to NumPy arrays.
-    // Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> copy_samples = samples[0];
-    // py::array_t<double> samples_np({copy_samples.rows(), copy_samples.cols()}, copy_samples.data());
-    // samples_np = samples_np.reshape({1, nb_val_scenarios, bilevelmodel->nb_follower_vars});
-
-    py::list samples_list;
-    for(int pr = 0; pr < nb_val_problems; ++pr){
-        Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> copy_samples = samples[pr];
-        py::array_t<double> sample_np({copy_samples.rows(), copy_samples.cols()}, copy_samples.data());
-        samples_list.append(sample_np);
+        std::cout << "R-hat (per dimension):\n" << samples_rhat.transpose() << "\n\n"; 
+        std::cout << "--------------------------------------\n";
     }
-    py::array samples_np_3d = np.attr("stack")(samples_list, 0);
 
-    // ESS
-    py::object ess = hp.attr("ess")(samples_np_3d,"method"_a="bulk");
-    std::cout << "ESS: " << py::str(ess).cast<std::string>() << std::endl;
+    ////////////////////////////////////////////////////////////////////////////////////////
 
-    std::cout << "--------------------------------------\n";
+    // Computing ESS with baseline hopsy.
+    // py::module np = py::module::import("numpy");
+    // py::module hp  = py::module::import("hopsy");
 
-    // evaluateDepGeneralLibrary(x_,fs_,F_c,F_delta,pi_c,m,eval_behavior);
+    // py::list samples_list;
+    // for(int pr = 0; pr < nb_val_problems; ++pr){
+    //     Eigen::Matrix<double, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor> copy_samples = samples[pr];
+    //     py::array_t<double> sample_np({copy_samples.rows(), copy_samples.cols()}, copy_samples.data());
+    //     samples_list.append(sample_np);
+    // }
+    // py::array samples_np_3d = np.attr("stack")(samples_list, 0);
+
+    // py::object ess = hp.attr("ess")(samples_np_3d,"method"_a="bulk");
+    // std::cout << "ESS: " << py::str(ess).cast<std::string>() << std::endl;
 }
+
+////////////////////////////////////////////////////////////////////////////////////////////////
+
+void Instance::evaluateSAADepGeneral(double & obj_value, 
+                                    double * alpha, double * alpha_min, int * j_min,  double * alpha_max, int * j_max,
+                                    std::vector<double*> samples,
+                                    int pr, const double * x_, const double * y_, 
+                                    double Fs_, double Fw_, double fs_, 
+                                    Input::TypesDepGeneral eval_behavior, int nb_int, double scaling) const {
+    // Compute parameters for current evaluation.
+    double F_c, F_delta, pi_c, m, p;
+    if(eval_behavior != Input::TypesDepGeneral::Neutral)
+        computeParamsDepGeneral(Fs_,Fw_,fs_,eval_behavior,nb_int,scaling,F_c,F_delta,pi_c,m,p);
+
+    // Initialize first current sample.
+    Eigen::VectorXd current_sample = Eigen::Map<const Eigen::VectorXd>(y_, bilevelmodel->nb_follower_vars);
+    
+    obj_value = 0.0;
+    for(int s = 0; s < nb_saa_scenarios; ++s){
+        for(int t = 0; t < nb_saa_thinning; ++t){
+    
+            // Computing alpha_min and alpha_max.
+            alpha_min[(s*nb_saa_thinning+t)] = defineMinStep(j_min[(s*nb_saa_thinning+t)],pr,(s*nb_saa_thinning+t),x_,current_sample.data(),fs_);
+            alpha_max[(s*nb_saa_thinning+t)] = defineMaxStep(j_max[(s*nb_saa_thinning+t)],pr,(s*nb_saa_thinning+t),x_,current_sample.data(),fs_);
+            
+            // Sampling alpha according to appropriate distribution. (only consider leader objective with respect to follower variables).
+            alpha[(s*nb_saa_thinning+t)] = sampleAlpha(pr,(s*nb_saa_thinning+t),alpha_min[(s*nb_saa_thinning+t)],alpha_max[(s*nb_saa_thinning+t)],computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,p,eval_behavior);
+            if(metropolis_acceptance == false){
+                // New point is always accepted.
+                for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i) 
+                    current_sample(i) = current_sample(i) + alpha[(s*nb_saa_thinning+t)]*dir_scenarios_dep_gen[pr][(s*nb_saa_thinning+t)][i];
+            }else if(eval_behavior == Input::TypesDepGeneral::Neutral){
+                for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i) 
+                    current_sample(i) = current_sample(i) + alpha[(s*nb_saa_thinning+t)]*dir_scenarios_dep_gen[pr][(s*nb_saa_thinning+t)][i];
+            }else{
+                // Compute new point to be tested if accepted or not.
+                Eigen::VectorXd test(bilevelmodel->nb_follower_vars);
+                for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i)
+                    test(i) = current_sample(i) + alpha[(s*nb_saa_thinning+t)]*dir_scenarios_dep_gen[pr][(s*nb_saa_thinning+t)][i];
+
+                // Compute probability to accept new point. (only consider leader objective with respect to follower variables).
+                double h = getEvalDepGeneralProb(computeLeaderObjFollowerVars(test.data()),F_c,F_delta,pi_c,m,p,eval_behavior)/
+                           getEvalDepGeneralProb(computeLeaderObjFollowerVars(current_sample.data()),F_c,F_delta,pi_c,m,p,eval_behavior);
+                
+                // Accept or not new point according to this probability.
+                if(accep_scenarios_dep_gen[pr][(s*nb_saa_thinning+t)] <= h){
+                    for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i)
+                        current_sample(i) = test(i);
+                }
+            }
+
+            // Include sample.
+            for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i)
+                samples[(s*nb_saa_thinning+t)][i] = current_sample(i);
+        }
+        obj_value += computeLeaderObjFollowerVars(current_sample.data());
+    }
+    obj_value = obj_value/nb_saa_scenarios;
+}
+
+////////////////////////////////////////////////////////////////////////////////////////////////
 
 void Instance::evaluateDepGeneralLibrary(const double * x_, double fs_, double F_c, double F_delta, double pi_c, double m, Input::TypesDepGeneral eval_behavior){
     // Make row-major copy of A_follower and contiguous copy of b_follower.
@@ -1246,7 +1658,8 @@ void Instance::evaluateDepGeneralLibrary(const double * x_, double fs_, double F
     Eigen::VectorXd c(bilevelmodel->nb_follower_vars);
     for(int i = 0; i < bilevelmodel->nb_follower_vars; ++i){
         c(i) = m*bilevelmodel->follower_vars[i].obj_leader;
-        if(eval_behavior == Input::TypesDepGeneral::GenFragile){
+        if(eval_behavior == Input::TypesDepGeneral::GenFragile || 
+           eval_behavior == Input::TypesDepGeneral::GenProportional){
             c(i) = c(i)/(F_delta);
         }
     }
@@ -1267,7 +1680,7 @@ void Instance::evaluateDepGeneralLibrary(const double * x_, double fs_, double F
     if(eval_behavior == Input::TypesDepGeneral::Neutral){
         problem = hp.attr("Problem")(A_np, b_np);
     }else if(eval_behavior == Input::TypesDepGeneral::GenProportional){
-        double a = pi_c + m*(-F_c);
+        double a = pi_c + m*(-F_c)/F_delta;
         py::object py_model = models.attr("LinearModel")(a, c_np);
         problem = hp.attr("Problem")(A_np, b_np,"model"_a=py_model);
     }else if(eval_behavior == Input::TypesDepGeneral::GenFragile){

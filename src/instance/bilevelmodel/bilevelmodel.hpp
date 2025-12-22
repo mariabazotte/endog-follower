@@ -31,10 +31,11 @@ struct BilevelConstraint {
     char sense;
     double rhs;
     std::map<int,double> coeffs;
+    double bound;
 
     BilevelConstraint(std::string name, char sense, double rhs): name(name), 
                                                                  sense(sense), 
-                                                                 rhs(rhs) {}
+                                                                 rhs(rhs),bound(0.0) {}
 };
 
 struct BilevelModel {
@@ -59,6 +60,9 @@ struct BilevelModel {
     int nb_follower_eq_constrs;
 
     BilevelModel(std::string);
+
+    private:
+        void computeFollowerConstrsBounds();
 };
 
 #endif

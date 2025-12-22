@@ -93,6 +93,18 @@ std::string AbstractLeaderSolver::writeComp() const {
         writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::Fragile,param,(x_leader_obj+eval),fs_,f_eval);
     }
 
+    // Strong Power.
+    for(double param : instance.getDepStrongWeakStrPowConfigs()){
+        instance.evaluateDepStrongWeak(eval,f_eval,Fs_,Fw_,fs_,fs_eps_,fw_eps_,Input::TypesDepStrongWeak::StrongPower,param);
+        writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::StrongPower,param,(x_leader_obj+eval),fs_,f_eval);
+    }
+
+    // Fragile Power.
+    for(double param : instance.getDepStrongWeakFrgPowConfigs()){
+        instance.evaluateDepStrongWeak(eval,f_eval,Fs_,Fw_,fs_,fs_eps_,fw_eps_,Input::TypesDepStrongWeak::FragilePower,param);
+        writeCompDepStrongWeak(output,Input::TypesDepStrongWeak::FragilePower,param,(x_leader_obj+eval),fs_,f_eval);
+    }
+
     // Dependent General configurations.
     const double * x_ = getX_();
     const double * yi_ = getFollower()->getYi_();
@@ -101,30 +113,36 @@ std::string AbstractLeaderSolver::writeComp() const {
     instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::Neutral,0,0.0);
     writeCompDepGeneral(output,Input::TypesDepGeneral::Neutral,0,0.0,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
 
-    // exit(0);
-
     // Proportional.
     for(int nb_int: instance.getDepGeneralIntConfigs()){
-        for(double scal: instance.getDepGeneralScalConfigs()){
-            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenProportional,nb_int,scal);
-            writeCompDepGeneral(output,Input::TypesDepGeneral::GenProportional,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
-
-            // break;
-        }
-        // break;
+        instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenProportional,nb_int,1.0);
+        writeCompDepGeneral(output,Input::TypesDepGeneral::GenProportional,nb_int,1.0,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
     }
-    // exit(0);
 
-    // Strong Fragile 
+    // Fragile. 
     for(int nb_int: instance.getDepGeneralIntConfigs()){
-        for(double scal: instance.getDepGeneralScalConfigs()){
+        for(double scal: instance.getDepGeneralScalFrgConfigs()){
             instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenFragile,nb_int,scal);
             writeCompDepGeneral(output,Input::TypesDepGeneral::GenFragile,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
-            
-            // break;
         }
-        break;
     }
+
+    // Fragile Power. 
+    for(int nb_int: instance.getDepGeneralIntConfigs()){
+        for(double scal: instance.getDepGeneralScalFrgPowConfigs()){
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenFragilePower,nb_int,scal);
+            writeCompDepGeneral(output,Input::TypesDepGeneral::GenFragilePower,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
+        }
+    }
+
+    // Strong Power. 
+    for(int nb_int: instance.getDepGeneralIntConfigs()){
+        for(double scal: instance.getDepGeneralScalStrPowConfigs()){
+            instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,x_,yi_,Fs_,Fw_,fs_,Input::TypesDepGeneral::GenStrongPower,nb_int,scal);
+            writeCompDepGeneral(output,Input::TypesDepGeneral::GenStrongPower,nb_int,scal,(x_leader_obj+eval),var_eval,ess,rhat,fs_,f_eval,f_var_eval);
+        }
+    }
+
     return output;
 }
 
@@ -146,9 +164,10 @@ LeaderSolver::LeaderSolver(const Input & input, Instance & instance, std::string
 
 LeaderSolver::~LeaderSolver(){
     delete follower;
-    if(x) delete[] x;
     if(x_) delete[] x_;
+    if(x) delete[] x;
     delete model;
+    if(pr == -1) delete env;
 }
 
 void LeaderSolver::params(){
@@ -156,9 +175,15 @@ void LeaderSolver::params(){
     model->set(GRB_DoubleParam_TimeLimit, input.getTimeLimit());
     model->set(GRB_DoubleParam_MIPGap, 1e-4);
     model->set(GRB_DoubleParam_IntFeasTol, 1e-5);
-    model->set(GRB_DoubleParam_FeasibilityTol, 1e-9);
+    model->set(GRB_DoubleParam_FeasibilityTol, 1e-6);
+    // model->set(GRB_IntParam_Presolve, 0);
     if(input.getVerbose() < 1) model->set(GRB_IntParam_OutputFlag, 0);
     else model->set(GRB_IntParam_OutputFlag, 1);
+
+    if(input.getFollowerBehavior() == Input::FollowerBehavior::DepGeneral && 
+       input.useLazyCallback() == true){
+        model->set(GRB_IntParam_LazyConstraints, 1);
+    }
 }
 
 void LeaderSolver::create(){
@@ -257,6 +282,9 @@ void LeaderSolver::upd_solution(){
 void LeaderSolver::solve(){
     double start_time = time(NULL); 
 
+    if(input.getFollowerBehavior() == Input::FollowerBehavior::DepGeneral && input.useLazyCallback() == true) 
+        model->setCallback(((DepGeneralFollowerSolver*)getFollower()));
+
     model->update();
     model->optimize();
 
@@ -333,6 +361,7 @@ SAALeaderSolver::SAALeaderSolver(const Input & input, Instance & instance, std::
 
 SAALeaderSolver::~SAALeaderSolver(){
     for(int i = 0; i < instance.getNbProblems(); ++i) delete solvers[i];
+    delete env;
 }
 
 void SAALeaderSolver::solve(){

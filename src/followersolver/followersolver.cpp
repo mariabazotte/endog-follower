@@ -506,6 +506,7 @@ void AbstractFollowerSolver::defineInteriorFollower(){
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
 void AbstractFollowerSolver::upd_solution(){
+    leader->getGRBModel()->write("solution.sol");
     if(leader->getNbSol() > 0){
         if(ys_) delete[] ys_;
         if(yw_) delete[] yw_;
@@ -517,28 +518,28 @@ void AbstractFollowerSolver::upd_solution(){
         if(yi) yi_ = leader->getGRBModel()->get(GRB_DoubleAttr_X,yi,instance.getModel()->nb_follower_vars);
         if(ys_eps) ys_eps_ = leader->getGRBModel()->get(GRB_DoubleAttr_X,ys_eps,instance.getModel()->nb_follower_vars);
 
-        Fs_ = Fs.get(GRB_DoubleAttr_X);
-        Fw_ = Fw.get(GRB_DoubleAttr_X);
-
-        std::cout << "Fs: " << Fs_ << " Fw: " << Fw_ << std::endl;
-
+        if((input.getFollowerBehavior() != Input::FollowerBehavior::DepGeneral) || 
+           ((input.getFollowerBehavior() == Input::FollowerBehavior::DepGeneral) && 
+            (input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral))){
+            Fs_ = Fs.get(GRB_DoubleAttr_X);
+            Fw_ = Fw.get(GRB_DoubleAttr_X);
+            // std::cout << "Fs: " << Fs_ << " Fw: " << Fw_ << std::endl;
+        }
         fs_ = fs.get(GRB_DoubleAttr_X);
-        std::cout << "fs: " << fs_ << std::endl;
+        // std::cout << "f: " << fs_ << std::endl;
+        
         if(input.isFollowerNearOpt() == true) {
-            fs_eps_ = fs_eps.get(GRB_DoubleAttr_X);
-            fw_eps_ = fw_eps.get(GRB_DoubleAttr_X);
-            std::cout << "fs: " << fs_eps_ << " fw: " << fw_eps_ << std::endl;
+            if((input.getFollowerBehavior() != Input::FollowerBehavior::DepGeneral) || 
+              ((input.getFollowerBehavior() == Input::FollowerBehavior::DepGeneral) && 
+               (input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral))){
+                fs_eps_ = fs_eps.get(GRB_DoubleAttr_X);
+                fw_eps_ = fw_eps.get(GRB_DoubleAttr_X);
 
-            long double obj_follower_pes = 0.0;
-            long double obj_follower_opt = 0.0;
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                std::cout << ys_[i] << " " << ys_eps_[i] << " " << yw_[i] << std::endl;
-                BilevelVariable var = instance.getModel()->follower_vars[i];
-                
-                obj_follower_opt += var.obj_follower*ys_eps_[i];
-                obj_follower_pes += var.obj_follower*yw_[i];
+                // std::cout << "fs: " << fs_eps_ << " fw: " << fw_eps_ << std::endl;
+                // for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+                //     std::cout << ys_[i] << " " << ys_eps_[i] << " " << yw_[i] << std::endl;
+                // }
             }
-            std::cout << "fs: " << obj_follower_opt << " fw: " << obj_follower_pes << std::endl;
         }
     }
 }

@@ -30,7 +30,8 @@ class Input {
             Neutral = 0,            /* Neutral. */
             GenProportional = 1,    /* Proportional. */
             GenFragile = 2,         /* Fragile. */
-            GenFragilePower = 3     /* Fragile: power version. */
+            GenFragilePower = 3,    /* Fragile: power version. */
+            GenStrongPower = 4      /* Strong: power version. */
         };
 
         enum SolverApproach {       /* Approaches for solving the stochastic program with decision-dependent uncertainty. */
@@ -71,12 +72,15 @@ class Input {
         std::vector<double> gen_intervals;         /* Interval values to define cooperation coefficient. */
         std::vector<double> gen_coeff_intervals;   /* Cooperation coefficient value for each interval. */
         double gen_max_coeff_intervals;            /* Maximum cooperation coefficient value between intervals. */
-        double gen_scaling_param;                  /* Parameter > 0 defining scaling for cooperation cooeficient if Decision-dependent general Proportional and Strong Fragile cases. */
+        double gen_scaling_param;                  /* Parameter > 0 for fragile and = 1 for proportional defining scaling for cooperation cooeficient if Decision-dependent general Proportional and Strong Fragile cases. */
         bool gen_step_explicit;                    /* 0 -> Do not use explicit formulation for step variables. 1-> Use explicit formulation for step variables. */
         
         // Solution approaches.
         int int_solver_approach;
         SolverApproach solver_approach;            /* Approach to solve the stochastic program with decision dependent uncertainty. */
+
+        bool relaxation;
+        bool lazy_callback;
 
         // Solution files.
         std::string solution_file;                 /* File to write results. */
@@ -134,6 +138,9 @@ class Input {
         int getNbIntervalsGeneral() const { return gen_nb_intervals; }
         double getIntValueGeneral(int i) const { return gen_intervals[i]; }
         double getIntCoeffGeneral(int i) const { return gen_scaling_param*gen_coeff_intervals[i]; }
+        double getIntCoeffPowerFrgGeneral(int i) const { return (1.0 + gen_scaling_param * std::abs(gen_coeff_intervals[i])); }
+        double getIntCoeffPowerStrGeneral(int i) const { return ( (1.0 / gen_scaling_param) * std::max(1e-8,std::abs(gen_coeff_intervals[i]))); }
+        int getIntCoeffSignalGeneral(int i) const { if(gen_coeff_intervals[i] <= -1e-12) return -1; else return 1;}
         double getMaxIntCoeffGeneral() const { return gen_scaling_param*gen_max_coeff_intervals; }
         double getScalingGeneral() const { return gen_scaling_param; }
         bool useStepExplicitGeneral() const { return gen_step_explicit; }
@@ -144,6 +151,9 @@ class Input {
         
         // Problem resolution
         Input::SolverApproach getSolverApproach() const { return solver_approach; }
+
+        bool useRelaxation() const { return relaxation; }
+        bool useLazyCallback() const { return lazy_callback; }
 
         // General parameters
         double getTimeLimit() const { return time_limit; }

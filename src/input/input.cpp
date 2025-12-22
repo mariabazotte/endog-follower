@@ -19,7 +19,7 @@ void Input::defaultParams(){
 
     // Parameters for Type of Decision-Dependent General case
     gen_nb_intervals = 4;
-    gen_scaling_param = 2.0;
+    gen_scaling_param = 1.0;
     gen_step_explicit = true;
     defineGeneralIntervals();
 
@@ -44,6 +44,9 @@ void Input::defaultParams(){
 
     coordinate_har = false;
     metropolis_hastings = true;
+
+    relaxation = false;
+    lazy_callback = true;
 }
 
 Input::Input(int argc, char* argv[]){
@@ -162,7 +165,7 @@ void Input::defineGeneralIntervals(){
         gen_coeff_intervals[i] = 1.0 - (gen_intervals[i]+gen_intervals[i+1]);
         gen_max_coeff_intervals = std::max(gen_max_coeff_intervals,gen_coeff_intervals[i]);
     }
-    gen_max_coeff_intervals += 1e-4;
+    gen_max_coeff_intervals += 1e-8;
 }
 
 void Input::defineSolutionFile(){
@@ -204,6 +207,10 @@ void Input::defineSolutionFile(){
             solution_file += "proportional/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
         if(type_dep_general == Input::TypesDepGeneral::GenFragile)
             solution_file += "fragile/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+        if(type_dep_general == Input::TypesDepGeneral::GenFragilePower)
+            solution_file += "fragile_power/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+        if(type_dep_general == Input::TypesDepGeneral::GenStrongPower)
+            solution_file += "strong_power/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
     }
 
     // Configuration corresponding to follower optimiality.
@@ -277,13 +284,13 @@ void Input::testParameters(){
         }
     }
     if(follower_behavior == Input::FollowerBehavior::DepStrongWeak){
-        if(int_type_dep_strongweak > 3){
+        if(int_type_dep_strongweak > 5){
             throw std::runtime_error(std::string("Wrong type of strong weak decision-dependent cooperation value."));
             exit(0);
         }
     }
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
-        if(int_type_dep_general > 2){
+        if(int_type_dep_general > 4){
             throw std::runtime_error(std::string("Wrong type of general decision-dependent cooperation value."));
             exit(0);
         }
@@ -360,13 +367,30 @@ void Input::testParameters(){
 
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         if(type_dep_general != Input::TypesDepGeneral::Neutral){
-            if(gen_scaling_param <= -1e-8){
-                std::cout << "Scaling parameter must be > 0. Setting parameter to default value 2.0." << std::endl;
-                gen_scaling_param = 2.0;
-            }
             if(gen_nb_intervals <= -1e-8){
                 std::cout << "Nb. intervals parameter must be > 0. Setting parameter to default value 4." << std::endl;
                 gen_nb_intervals = 4;
+            }
+
+            if(type_dep_general == Input::TypesDepGeneral::GenProportional){
+                if(gen_scaling_param <= (1.0 - 1e-8) || gen_scaling_param >= (1.0 + 1e-8) ){
+                    std::cout << "Scaling parameter must be equal to 1.0 for general proportional case. Setting parameter to value 1.0." << std::endl;
+                    gen_scaling_param = 1.0;
+                }
+            }
+
+            if(type_dep_general == Input::TypesDepGeneral::GenFragile || type_dep_general == Input::TypesDepGeneral::GenFragilePower){
+                if(gen_scaling_param <= -1e-8){
+                    std::cout << "Scaling parameter must be > 0 for general fragile or general fragile power case. Setting parameter to default value 1.0." << std::endl;
+                    gen_scaling_param = 1.0;
+                }
+            }
+
+            if(type_dep_general == Input::TypesDepGeneral::GenStrongPower){
+                if(gen_scaling_param <= (1.0 - 1e-8)){
+                    std::cout << "Scaling parameter must be >= 1.0 for general strong power case. Setting parameter to default value 1.0." << std::endl;
+                    gen_scaling_param = 1.0;
+                }
             }
         }
     }
@@ -397,8 +421,7 @@ void Input::display(){
     }if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         std::cout << "COOPERATION TYPE :  " << type_dep_general << std::endl;
         std::cout << "EXPL STEP        :  " << gen_step_explicit << std::endl;
-        if(type_dep_general == Input::TypesDepGeneral::GenProportional || 
-            type_dep_general == Input::TypesDepGeneral::GenFragile){
+        if(type_dep_general != Input::TypesDepGeneral::Neutral){
             std::cout << "NB INTERVALS     :  " << gen_nb_intervals << std::endl;
             std::cout << "SCALING PARAM    :  " << gen_scaling_param << std::endl;
         }
@@ -444,8 +467,7 @@ void Input::write(std::string output){
         }if(follower_behavior == Input::FollowerBehavior::DepGeneral){
             solFile << type_dep_general << ";";
             solFile << gen_step_explicit << ";";
-            if(type_dep_general == Input::TypesDepGeneral::GenProportional || 
-                type_dep_general == Input::TypesDepGeneral::GenFragile){
+            if(type_dep_general != Input::TypesDepGeneral::Neutral){
                 solFile << gen_nb_intervals << ";";
                 solFile << gen_scaling_param << ";";
             }
@@ -567,12 +589,24 @@ std::ostream& operator<<(std::ostream& lhs, const Input::TypesDepStrongWeak & ty
 
 std::ostream& operator<<(std::ostream& lhs, const Input::TypesDepGeneral & type_dep_general) {
     switch(type_dep_general) {
+        case Input::TypesDepGeneral::Neutral: {
+            lhs << "Neutral";
+            break;
+        }
         case Input::TypesDepGeneral::GenProportional: {
-            lhs << "Proportional";
+            lhs << "GenProportional";
             break;
         }
         case Input::TypesDepGeneral::GenFragile: {
             lhs << "GenFragile";
+            break;
+        }
+        case Input::TypesDepGeneral::GenFragilePower: {
+            lhs << "GenFragilePower";
+            break;
+        }
+        case Input::TypesDepGeneral::GenStrongPower: {
+            lhs << "GenStrongPower";
             break;
         }
         default :{
