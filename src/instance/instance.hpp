@@ -9,13 +9,13 @@
 #include <cmath>
 #include <vector>
 #include <random>
-#include <iomanip>
 #include <iostream>
 #include <algorithm>
 #include <stdexcept>
 #include <Eigen/Dense>
 #include <pybind11/numpy.h>
 #include <pybind11/embed.h>
+#include <pybind11/iostream.h>
 namespace py = pybind11;
 using namespace pybind11::literals; 
 
@@ -36,6 +36,8 @@ class Instance {
         int nb_val_scenarios;                          /* Number of scenarios for the validation test. */
         int nb_val_thinning;                           /* Number of thinning scenarios for the validation test. */
 
+        int nb_warm_start_scenarios;                   /* Number of scenarios used for warm start to compute covariance transformation when covariance_transform = true. */
+
         double critical_tstudent;                      /* Critical value for t-student distribution. */
         double critical_normal;                        /* Critical value for normal distribution. */
 
@@ -46,12 +48,17 @@ class Instance {
         std::uniform_int_distribution<> uniform_int;   /* Uniform int distribution for sampling scenarios. (decision-dependent general direction random vector for coordinate hit and run) */
 
         bool coordinate_mcmc;                          /* 0-> Do not use coordinate (use full instead) markov chain monte carlo hit and run, 1-> Use coordinate markov chain monte carlo hit-and-run. */
+        bool metropolis_acceptance;                    /* 0-> Do not use metropolis-hastings for evaluation hit-and-run, 1-> Use metropolis-hastings for evalutaion hit-and-run. */
+        bool eval_slice_sampling;                      /* 0-> Use inverse sampling for evaluation hit-and-run when metropolis-hastings==false, 1-> Use slice sampling for evaluation when metropolis-hastings==false. */
+
         bool constr_normal_transform;                  /* 0-> Do not use constraint normal transform for hit and run, 1-> Use constraint normal transform for hit-and-run. */
+        bool covariance_transform;                     /* 0-> Do not use covariate transform for hit and run, 1-> Use covariate transform for hit and run. */
         bool polyround_transform;                      /* 0-> Do not use polyround transform for hit-and-run, 1-> Use polyround transform for hit-and-run. */
         bool polyround_transform_specific;             /* 0-> Do not use polyround transform specific (for a fixed leader decision at evaluation step only) for hit and run, 1-> Use polyround transform specific for hit-and-run. */
-        bool transform_specific_executed;              /* 0-> Polyround transform specific has not been executed yet, 1-> Polyround transform specific has already been executed. */
-        bool metropolis_acceptance;                    /* 0-> Do not use metropolis-hastings for evaluation hit-and-run, 1-> Use metropolis-hastings for evalutaion hit-and-run. */
-        bool eval_slice_sampling;                      /* 0-> Use inverse sampling for evaluation hit-and-run when metropolis-hastings==false, Use slice sampling*/
+        double * prev_x_ = NULL;                       /* Leader decision used to compute specific polyround transform. (saa) */
+        double * eval_prev_x_ = NULL;                  /* Leader decision used to compute specific polyround transform. (eval)*/
+        
+        double * prev_yi_ = NULL;
 
         Eigen::MatrixXd A_follower;                    /* Inequality constraints matrix on follower problem. (only follower variables)*/
         Eigen::VectorXd b_follower;                    /* RHS value inequality constraints on follower problem. */
@@ -60,14 +67,18 @@ class Instance {
         Eigen::MatrixXd nullspace;                     /* Null space matrix for equality constraints on follower problem. */
         Eigen::MatrixXd constrnorm_tr;                 /* Transformation matrix when constr_normal_transform = true. */
         Eigen::MatrixXd polyround_tr;                  /* Transformation matrix when polyround_transform = true, or polyround_transform_specific = true. */
-       
+        Eigen::MatrixXd covariance_tr;                 /* Transformation matrix when covariance_transform = true. */
+
         // Scenarios for Decision-dependent strong-weak case.
         std::vector<std::vector<double>> scenarios_dep_strwk;                   /* scenarios_dep_strwk[pr][s]: inverse value of beta or cooperation level sampled from U(0,1) for transformed scenario s of the SAA problem pr. */
+        std::vector<std::vector<double>> weight_dep_strwk;
+        std::vector<int> nb_scenarios_dep_strwk;
 
         // Scenarios for Decision-dependent general case.
-        std::vector<std::vector<std::vector<double>>> dir_scenarios_dep_gen;    /* dir_scenarios_dep_gen[pr][s]: (upsilon) direction vector for general case transformed scenario s of the SAA problem pr. */
-        std::vector<std::vector<double>> step_scenarios_dep_gen;                /* step_scenarios_dep_gen[pr][s]: (tau) sample U(0,1) to define step for general case transformed scenario s of the SAA problem pr.  */
-        std::vector<std::vector<double>> accep_scenarios_dep_gen;               /* accep_scenarios_dep_gen[pr][s]: (phi) sample U(0,1) to define acceptance rate for general case transformed scenario s of the SAA problem pr. */
+        std::vector<std::vector<std::vector<double>>> dir_scenarios_dep_gen_base; /* auxiliar sample used for a basis for simulation.  */ 
+        std::vector<std::vector<std::vector<double>>> dir_scenarios_dep_gen;      /* dir_scenarios_dep_gen[pr][s]: (upsilon) direction vector for general case transformed scenario s of the SAA problem pr. */
+        std::vector<std::vector<double>> step_scenarios_dep_gen;                  /* step_scenarios_dep_gen[pr][s]: (tau) sample U(0,1) to define step for general case transformed scenario s of the SAA problem pr.  */
+        std::vector<std::vector<double>> accep_scenarios_dep_gen;                 /* accep_scenarios_dep_gen[pr][s]: (phi) sample U(0,1) to define acceptance rate for general case transformed scenario s of the SAA problem pr. */
 
         std::vector<std::vector<double>> coeff_obj_follower_alpha;              /* coeff_obj_follower_alpha[pr][s]: coefficient of the alpha variable at the follower near optimal objective value constraint at problem pr and scenario s. */
         std::vector<std::vector<double>> coeff_obj_leader_alpha;                /* coeff_obj_leader_alpha[pr][s]: coefficient of the alpha variable for leader objective value constraint at problem pr and scenario s. */
@@ -77,6 +88,7 @@ class Instance {
         std::vector<std::vector<std::vector<std::vector<int>>>> bdubs_alpha;    /* bdubs_alpha[pr][s][0/1]: list of upper bounds on follower variables defining alpha min (0), and alpha max (1) in problem pr and scenario s. */
 
         // Evaluation scenarios for Decision-dependent general case.
+        std::vector<std::vector<std::vector<double>>> dir_eval_dep_gen_base;                 /* auxiliar sample used for a basis for simulation.  */
         std::vector<std::vector<std::vector<double>>> dir_eval_dep_gen;                      /* dir_eval_dep_gen[s]: (upsilon) direction for general case for evaluation step.  */
         std::vector<std::vector<double>> step_eval_dep_gen;                                  /* step_eval_dep_gen[s]: (tau) sample U(0,1) to define step for general case for evaluation step. */
         std::vector<std::vector<double>> accep_eval_dep_gen;                                 /* accep_eval_dep_gen[s]: (phi) sample U(0,1) to define acceptance rate for general case for evaluation step. */
@@ -96,10 +108,10 @@ class Instance {
         std::vector<double> dep_strwk_str_pow_cg = {2.0, 5.0, 10.0};
         std::vector<double> dep_strwk_frg_pow_cg = {2.0, 5.0, 10.0};
 
-        std::vector<int> dep_gen_int_cg = {4, 8, 12};
+        std::vector<int> dep_gen_int_cg = {-1};
         std::vector<double> dep_gen_scal_frg_cg = {0.5, 2.0, 5.0, 10.0, 20.0, 40.0, 80.0};
-        std::vector<double> dep_gen_scal_frg_pow_cg = {1.0, 2.0, 5.0, 10.0};
-        std::vector<double> dep_gen_scal_str_pow_cg = {1.0, 2.0, 5.0, 10.0};
+        std::vector<double> dep_gen_scal_frg_pow_cg = {1.0, 2.0, 5.0, 10.0, 20.0};
+        std::vector<double> dep_gen_scal_str_pow_cg = {1.0, 2.0, 5.0, 10.0, 20.0};
 
         void defineName();                                              /* Define instance name. */
         void defineCriticalValues();                                    /* Define critical values. */
@@ -108,13 +120,16 @@ class Instance {
         void computeDepGenConstrNormTransform();                        /* Function to compute transformation for follower problem based on constraint normal for hit-and-run used on General decision-dependent cases. */
         void computeDepGenPolyRoundTransform(const Eigen::VectorXd &);  /* Function to compute transformation for follower problem based on the polyround library for hit-and-run used on General decision-dependent cases. */
         void computeDepGenPolyRoundTransform(const double *, double);   /* Function to compute transformation for follower problem considering a fixed leader decision based on the polyround library for hit-and-run. */
+        void computeWhitening(const Eigen::MatrixXd &);                 /* Function to compute transformation for follower problem considering a fixed leader decision based on the covariance for hit-and-run. */
         void nullSpaceFollowerEqConstrs(bool);                          /* Function to define null space for equality constraints of the follower problem. */
-        void updInfoEvaluateDepGeneral(const double *, double);         /* Function to update sampling information when polyround_transform_specific = true. */ 
+        void updDirDepGeneral(bool);                                    /* Function to update sampling information when polyround_transform_specific = true or covariance_transform = true. */ 
          
         void generateScenarios();                                           /* Generate scenarios. */
         double inverseDepStrongWeakScenario(int);                           /* Function to sample scenarios for decision-dependent strong weak case. */
-        void directionDepGeneralScenario(int,std::vector<double> &, bool);  /* Function to sample direction scenarios for decision-dependent general case. */
-        void directionDepGeneralScenarioEvalModify();                       /* Function to update direction samples when polyround_transform_specific = true. */ 
+        void dirEigenDepGeneralScenario(int, Eigen::VectorXd &);            /* Function to sample direction scenarios for decision-dependent general case. */
+        void normDirDepGeneralScenario(int, std::vector<double> &);         /* Nomalize and apply leader non-specific transformations. */
+        void dirDepGeneralScenario(int, std::vector<double> &);             /* Uniform (base) sample, not normalized or transformed yet. */        
+        void transformDirDepGeneralScenario(bool);                          /* Function to update (apply leader specific transformations) direction samples when polyround_transform_specific = true or covariance_transform = true. */ 
         void defineGeneralStepInfo(bool, int,                               /* Function to define scenario step information for decision-dependent general case. */
             std::vector<double> &, std::vector<double> &,
             std::vector<std::vector<double>> &, 
@@ -133,9 +148,6 @@ class Instance {
         // Getters for current step/alpha min and max for evaluation general decision-dependent.
         double defineEvalMinStep(int, int, const double *, const double *, double) const;
         double defineEvalMaxStep(int, int, const double *, const double *, double) const;
-
-        double defineMinStep(int &, int, int, const double *, const double *, double) const;
-        double defineMaxStep(int &, int, int, const double *, const double *, double) const;
         
         // Getters for sampling current step/alpha final value for evaluation general decision-dependent.
         double sampleEvalAlpha(int, int, double, double, double, double, double, double, double, double, Input::TypesDepGeneral) const;
@@ -147,6 +159,9 @@ class Instance {
         
         double sampleAlpha(int, int, double, double, double, double, double, double, double, double, Input::TypesDepGeneral) const;
         double sampleUniformAlpha(int, int, double, double) const;
+        double sampleLinearAlpha(int, int, double, double, double, double) const;
+        double sampleExponentialAlpha(int, int, double, double, double) const;
+        double samplePowerAlpha(int, int, double, double, double, double, double) const;
         void defineSlice(int, int, double &, double &, double, double, double, double, double, double, Input::TypesDepGeneral) const; 
     
         // Getter for decision-dependent strong-weak probability for current follower optimal objective value.
@@ -158,9 +173,12 @@ class Instance {
         // Method for general library implementation for comparison.
         void evaluateDepGeneralLibrary(const double *, double, double, double, double, double, Input::TypesDepGeneral);
 
+        bool arrays_are_different(const double*);
+        bool eval_arrays_are_different(const double*);
+
     public:
         Instance(const Input &);                 
-        ~Instance(){ delete bilevelmodel; }
+        ~Instance(){ delete bilevelmodel; if(prev_x_) delete[] prev_x_; if(eval_prev_x_) delete[] eval_prev_x_; }
 
         BilevelModel * getModel() const { return bilevelmodel; }
         
@@ -177,7 +195,9 @@ class Instance {
         double getStepSizeInterval() const { return 10; }
 
         // Getters for scenario information for strong-weak decision-dependent case.
+        int getStrongWeakNbScenarios(int pr) const { return nb_scenarios_dep_strwk[pr]; }
         double getStrongWeakScenario(int pr, int s) const { return scenarios_dep_strwk[pr][s]; }
+        double getStrongWeakWeight(int pr, int s) const { return weight_dep_strwk[pr][s]; }
         
         // Getters for scenario information for general decision-dependent case.
         double getGeneralDirection(int pr, int s, int i) const { return dir_scenarios_dep_gen[pr][s][i]; }
@@ -211,7 +231,8 @@ class Instance {
         const std::vector<double> & getDepGeneralScalStrPowConfigs() const { return dep_gen_scal_str_pow_cg; }
         
         // Getters for strong-weak probability for current follower optimal objective value.
-        double getStrongWeakProbab(double) const;                                            // Return probability optimistic case for current decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
+        double getStrongWeakProbab(double) const;                                   // Return probability optimistic case for current decision-dependent strong-weak follower behavior and obtained optimal leader solution and optimal follower value.
+        std::string getStrongWeakStringFunction() const;                            // Return string representing current behavior function for decision-dependent strong weak.                                         
         
         // Evaluation of strong-weak fixed case for current leader decision.
         void evaluateFixStrongWeak(double &, double &, double, double, double, double, double) const;
@@ -219,11 +240,14 @@ class Instance {
         // Evaluation of strong-weak decision-dependent case for current leader decision.
         void evaluateDepStrongWeak(double &, double &, double, double, double, double, double, Input::TypesDepStrongWeak, double) const;
 
+        // Getter for min/max step/alpha of general decision-dependent case for current leader decision and follower scenario decision.
+        double defineMinStep(int &, int, int, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double, bool) const;
+        double defineMaxStep(int &, int, int, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double, bool) const;
+
         // Evaluation of general decision-dependent case for current leader decision.
         void evaluateDepGeneral(double &, double &, double &, double &, double &, double &, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double);
+        void evaluateSAADepGeneral(double &, int, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double);
 
-        void evaluateSAADepGeneral(double &, double *, double *, int *, double *, int *, std::vector<double*>, int, const double *, const double *, double, double, double, Input::TypesDepGeneral, int, double) const;
-        
         // Display instance information.
         void display() const;
 };

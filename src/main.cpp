@@ -23,6 +23,7 @@ int main(int argc, char *argv[]) {
         // Read instance.
         Instance instance(input);
 		instance.display();
+		input.setInstAlign(instance.getModel()->alignment);
 
         // Define and solve leader problem.
 		LeaderSolverFactory factory;

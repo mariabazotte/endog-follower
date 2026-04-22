@@ -30,11 +30,14 @@ BilevelModel::BilevelModel(std::string instance_file) {
                 leader_vars.push_back(BilevelVariable(id,name,lb,ub,obju,0.0,ty));
             }
         }
+        std::string str_ub;
         if(nb_follower_vars > 0){
             for(int id = 0; id < nb_follower_vars; ++id){
                 file >> name;
                 file >> lb;
-                file >> ub;
+                file >> str_ub;
+                if(str_ub == "inf") ub = inf;
+                else ub = std::stod(str_ub);
                 file >> obju;
                 file >> objl;
                 file >> ty;
@@ -53,7 +56,7 @@ BilevelModel::BilevelModel(std::string instance_file) {
                 file >> name_constr;
                 file >> sense;
                 file >> rhs;
-                if(ty != '=' && ty != '<' && ty != '>') 
+                if(sense != '=' && sense != '<' && sense != '>') 
                     throw std::runtime_error(std::string("Incorrect instance file. Leader constraints (=,<,>)")); 
                 leader_constrs.push_back(BilevelConstraint(name_constr,sense,rhs));
 
@@ -64,22 +67,27 @@ BilevelModel::BilevelModel(std::string instance_file) {
             }
         }
 
-        for(int i = 0; i < nb_follower_constrs; ++i){
-            file >> name_constr;
-            file >> sense;
-            file >> rhs;
-            if(sense != '=' && sense != '<' && sense != '>')  
-                throw std::runtime_error(std::string("Incorrect instance file. Follower constraints (=,<,>)")); 
-            follower_constrs.push_back(BilevelConstraint(name_constr,sense,rhs));
-            if(sense == '=') nb_follower_eq_constrs += 1;
+        if(nb_follower_constrs > 0){
+            for(int i = 0; i < nb_follower_constrs; ++i){
+                file >> name_constr;
+                file >> sense;
+                file >> rhs;
+                if(sense != '=' && sense != '<' && sense != '>')  
+                    throw std::runtime_error(std::string("Incorrect instance file. Follower constraints (=,<,>)")); 
+                if(sense == '=')
+                    throw std::runtime_error(std::string("Incorrect instance file. Sampling with follower with equality constraints (=) not tested.")); 
+                
+                follower_constrs.push_back(BilevelConstraint(name_constr,sense,rhs));
+                if(sense == '=') nb_follower_eq_constrs += 1;
 
-            for(int id = 0; id < nb_leader_vars; ++id) {
-                file >> coeff;
-                follower_constrs[i].coeffs[id] = coeff;
-            }
-            for(int id = 0; id < nb_follower_vars; ++id) {
-                file >> coeff;
-                follower_constrs[i].coeffs[id+nb_leader_vars] = coeff;
+                for(int id = 0; id < nb_leader_vars; ++id) {
+                    file >> coeff;
+                    follower_constrs[i].coeffs[id] = coeff;
+                }
+                for(int id = 0; id < nb_follower_vars; ++id) {
+                    file >> coeff;
+                    follower_constrs[i].coeffs[id+nb_leader_vars] = coeff;
+                }
             }
         }
         file.close();
@@ -91,6 +99,9 @@ BilevelModel::BilevelModel(std::string instance_file) {
 
     // Compute follower constraints bounds.
     computeFollowerConstrsBounds();
+
+    // Compute alignment follower and leader objectives,
+    computeAlignment();
 
     // Verify bilevel model.
     // Leader problem is not bounded: problem defining general decision-dependent case.
@@ -140,3 +151,24 @@ void BilevelModel::computeFollowerConstrsBounds(){
     }
 }
 
+void BilevelModel::computeAlignment(){
+    double dot = 0.0;
+    double norm_leader = 0.0;
+    double norm_follower = 0.0;
+    
+    for(int i = 0; i < nb_follower_vars; ++ i){
+        dot += follower_vars[i].obj_leader * follower_vars[i].obj_follower;
+        norm_leader += follower_vars[i].obj_leader * follower_vars[i].obj_leader;
+        norm_follower += follower_vars[i].obj_follower * follower_vars[i].obj_follower;
+    }
+
+    norm_leader = std::sqrt(norm_leader);
+    norm_follower = std::sqrt(norm_follower);
+
+    double denom = norm_leader * norm_follower;
+    if(denom <= 1e-12) alignment = 0.0;
+    else{
+        double val = dot / denom;
+        alignment = std::clamp(val, -1.0, 1.0);
+    }
+ }

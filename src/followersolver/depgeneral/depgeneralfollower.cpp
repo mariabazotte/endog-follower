@@ -2,25 +2,33 @@
 #include "../../leadersolver/leadersolver.hpp"
 
 DepGeneralFollowerSolver::DepGeneralFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader, int pr) :
-                                    AbstractFollowerSolver(input,instance,leader), pr(pr), 
-                                    metropolis_hastings(input.metropolisHastings()) { 
+                                    AbstractFollowerSolver(input,instance,leader), pr(pr), metropolis_hastings(input.metropolisHastings()), 
+                                    grb_minmax(input.useStepExplicitGRBMinMax()), big_m(false), numeric(1.0), cuts_mipnode(true) { 
     // Initialize pointers to NULL.
     y.resize(instance.getNbScenarios(),NULL);
+    y_.resize(instance.getNbScenarios(),NULL);
+    
     b_alpha_min.resize(instance.getNbScenarios(),NULL);
     b_alpha_max.resize(instance.getNbScenarios(),NULL);
+
     bound_alpha_min.resize(instance.getNbScenarios(),NULL);
     bound_alpha_max.resize(instance.getNbScenarios(),NULL);
-    
-    alpha_ = new double[instance.getNbScenarios()];
+
+    // alpha_ = new double[instance.getNbScenarios()];
     alpha_min_ = new double[instance.getNbScenarios()];
     alpha_max_ = new double[instance.getNbScenarios()];
-    b_alpha_min_ = new int[instance.getNbScenarios()];
-    b_alpha_max_ = new int[instance.getNbScenarios()];
-    y_.resize(instance.getNbScenarios(),NULL);
-    bound_alpha_min_.resize(instance.getNbScenarios(),NULL);
-    bound_alpha_max_.resize(instance.getNbScenarios(),NULL);
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        y_[s] = new double[instance.getModel()->nb_follower_vars];
+
+    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty){
+        b_alpha_min_ = new int[instance.getNbScenarios()];
+        b_alpha_max_ = new int[instance.getNbScenarios()];
+        std::fill(b_alpha_min_, b_alpha_min_+instance.getNbScenarios(), -1);
+        std::fill(b_alpha_max_, b_alpha_max_+instance.getNbScenarios(), -1);
+
+        bound_alpha_min_ = new double[instance.getNbScenarios()];
+        bound_alpha_max_ = new double[instance.getNbScenarios()];
+        
+        for(int s = 0; s < instance.getNbScenarios(); ++s)
+            y_[s] = new double[instance.getModel()->nb_follower_vars];
     }
     
     // Create problem
@@ -42,18 +50,19 @@ void DepGeneralFollowerSolver::defineLeaderObj(){
 
 void DepGeneralFollowerSolver::defineMCMCVars(){
     // Define scenario variables representing follower primal ones.
-    for(int s = 0; s < instance.getNbScenarios(); ++s) {
+    for(int s = 0; s < instance.getNbScenarios(); ++s){
         definePrimalVars(y[s],"_" + std::to_string(s+1));
+        // definePrimalConstrs(y[s],"_" + std::to_string(s+1));
     }
 
     // Define step and step maximum and minimum value variables (alpha, alpha_min and alpha_max).
-    alpha = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_CONTINUOUS);
+    // alpha = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_CONTINUOUS);
     alpha_min = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_CONTINUOUS);
     alpha_max = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_CONTINUOUS);
     for(int s = 0; s < instance.getNbScenarios(); ++s){
-        alpha[s].set(GRB_DoubleAttr_LB,-instance.getStepSizeInterval()*numeric);
-        alpha[s].set(GRB_DoubleAttr_UB,instance.getStepSizeInterval()*numeric);
-        alpha[s].set(GRB_StringAttr_VarName,"alpha_"+std::to_string(s));
+        // alpha[s].set(GRB_DoubleAttr_LB,-instance.getStepSizeInterval()*numeric);
+        // alpha[s].set(GRB_DoubleAttr_UB,instance.getStepSizeInterval()*numeric);
+        // alpha[s].set(GRB_StringAttr_VarName,"alpha_"+std::to_string(s));
 
         alpha_min[s].set(GRB_DoubleAttr_LB,-instance.getStepSizeInterval()*numeric);
         alpha_min[s].set(GRB_DoubleAttr_UB,0.0);
@@ -80,14 +89,15 @@ void DepGeneralFollowerSolver::defineMCMCVars(){
 
 void DepGeneralFollowerSolver::defineMCMCConstrs(){
     // Define alpha variables from alpha_min and alpha_max.
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        double tau = instance.getGeneralStep(pr,s);
-        leader->getGRBModel()->addConstr(alpha[s] == (1.0 - tau)*alpha_min[s] + tau*alpha_max[s]);
-    }
+    // for(int s = 0; s < instance.getNbScenarios(); ++s){
+    //     double tau = instance.getGeneralStep(pr,s);
+    //     leader->getGRBModel()->addConstr(alpha[s] == (1.0 - tau)*alpha_min[s] + tau*alpha_max[s]);
+    // }
 
     // Define maximum and minimum step variables (alpha_min and alpha_max).
-    if(input.useStepExplicitGeneral() == true) defineExplicitStep();
-    else defineKKTStep();
+    if((input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel) && 
+       (input.useStepExplicitGeneral() == false)) defineKKTStep();  
+    else defineExplicitStep();
 
     // Define sequence.
     defineSequence();
@@ -99,7 +109,9 @@ void DepGeneralFollowerSolver::defineMCMCConstrs(){
         // Define sequence according to probability.
         if(metropolis_hastings == true) 
             defineSequenceWithMetropolisHastings();
-        else defineSequenceWithSliceSampling();
+        else{
+            defineSequenceWithSliceSampling();
+        }
     } 
 }
 
@@ -127,8 +139,8 @@ void DepGeneralFollowerSolver::defineIntCoeffConstrs(){
     for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
         sum_expr += w[k];
 
-        leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, fsp >= input.getIntValueGeneral(k) + input.getEpsBigM());
-        leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, fsp <= input.getIntValueGeneral(k+1));
+        // leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, fsp >= input.getIntValueGeneral(k) + input.getEpsBigM());
+        // leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, fsp <= input.getIntValueGeneral(k+1));
 
         leader->getGRBModel()->addConstr(fsp >= (input.getIntValueGeneral(k) + input.getEpsBigM())*w[k]);
         leader->getGRBModel()->addConstr(fsp <= 1.0 + (input.getIntValueGeneral(k+1) - 1.0)*w[k]);   
@@ -136,13 +148,16 @@ void DepGeneralFollowerSolver::defineIntCoeffConstrs(){
     leader->getGRBModel()->addConstr(sum_expr == 1.0);
         
     // Define w_delta_k as multiplication of w_k*(Fw - Fs).
-    for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
-        leader->getGRBModel()->addGenConstrIndicator(w[k], 0.0, w_delta[k] == 0.0);
-        leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, w_delta[k] == (Fw -Fs));
+    double bigm = (leader->getGeneralUB() - leader->getGeneralLB());
+    // double bigm = (instance.getModel()->leader_ub - instance.getModel()->leader_lb);
 
-        leader->getGRBModel()->addConstr(w_delta[k] <= (Fw -Fs));
-        leader->getGRBModel()->addConstr(w_delta[k] >= (Fw -Fs) - (instance.getModel()->leader_ub - instance.getModel()->leader_lb)*(1.0 - w[k]));
-        leader->getGRBModel()->addConstr(w_delta[k] <= (instance.getModel()->leader_ub - instance.getModel()->leader_lb)*w[k]);
+    for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
+        // leader->getGRBModel()->addGenConstrIndicator(w[k], 0.0, w_delta[k] == 0.0);
+        // leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, w_delta[k] == (Fw -Fs));
+
+        leader->getGRBModel()->addConstr(w_delta[k] <= (Fw - Fs));
+        leader->getGRBModel()->addConstr(w_delta[k] >= (Fw - Fs) - bigm*(1.0 - w[k]));
+        leader->getGRBModel()->addConstr(w_delta[k] <= bigm*w[k]);
     }
 }
 
@@ -153,8 +168,9 @@ void DepGeneralFollowerSolver::defineSequence(){
         // Accept all new points.
         for(int s = 0; s < instance.getNbScenarios(); ++s){
             for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                if(s == 0) leader->getGRBModel()->addConstr(y[s][i] == yi[i] + (alpha[s]/numeric)*instance.getGeneralDirection(pr,s,i));
-                else leader->getGRBModel()->addConstr(y[s][i] == y[s-1][i] + (alpha[s]/numeric)*instance.getGeneralDirection(pr,s,i));
+                double tau = instance.getGeneralStep(pr,s);
+                if(s == 0) leader->getGRBModel()->addConstr(y[s][i] == yi[i] + ((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric))*instance.getGeneralDirection(pr,s,i));
+                else leader->getGRBModel()->addConstr(y[s][i] == y[s-1][i] + ((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric))*instance.getGeneralDirection(pr,s,i));
             }
         }
     }else{
@@ -162,19 +178,21 @@ void DepGeneralFollowerSolver::defineSequence(){
             // Accept all new points.
             for(int s = 0; s < instance.getNbScenarios(); ++s){
                 for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                    if(s == 0) leader->getGRBModel()->addConstr(y[s][i] == yi[i] + (alpha[s]/numeric)*instance.getGeneralDirection(pr,s,i));
-                    else leader->getGRBModel()->addConstr(y[s][i] == y[s-1][i] + (alpha[s]/numeric)*instance.getGeneralDirection(pr,s,i));
+                    double tau = instance.getGeneralStep(pr,s);
+                    if(s == 0) leader->getGRBModel()->addConstr(y[s][i] == yi[i] + ((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric))*instance.getGeneralDirection(pr,s,i));
+                    else leader->getGRBModel()->addConstr(y[s][i] == y[s-1][i] + ((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric))*instance.getGeneralDirection(pr,s,i));
                 }
             }
         }else{
             // Accept new points according to metropolis hastings rule.
             for(int s = 0; s < instance.getNbScenarios(); ++s){
                 for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+                    double tau = instance.getGeneralStep(pr,s);
                     if(s == 0){
-                        leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, y[s][i] == yi[i] + (alpha[s]/numeric)*instance.getGeneralDirection(pr,s,i));
+                        leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, y[s][i] == yi[i] + ((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric))*instance.getGeneralDirection(pr,s,i));
                         leader->getGRBModel()->addGenConstrIndicator(q[s], 0.0, y[s][i] == yi[i]);
                     }else{
-                        leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, y[s][i] == y[s-1][i] + (alpha[s]/numeric)*instance.getGeneralDirection(pr,s,i));
+                        leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, y[s][i] == y[s-1][i] + ((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric))*instance.getGeneralDirection(pr,s,i));
                         leader->getGRBModel()->addGenConstrIndicator(q[s], 0.0, y[s][i] == y[s-1][i]);
                     }
                 }
@@ -183,12 +201,14 @@ void DepGeneralFollowerSolver::defineSequence(){
     }
 }
 
+// Function to define acceptance variables for sequence in the case of metropolis hastings.
 void DepGeneralFollowerSolver::defineSequenceWithMetropolisHastings(){
     // Define metropolis hastings acceptance variables according to distribution.
     if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenProportional){
         // Define acceptance variables for proportional case.
         for(int s = 0; s < instance.getNbScenarios(); ++s){
             double r = instance.getGeneralAccep(pr,s);
+            double tau = instance.getGeneralStep(pr,s);
 
             GRBLinExpr expr = 0;
             for(int k = 0; k < input.getNbIntervalsGeneral(); ++k)
@@ -201,10 +221,10 @@ void DepGeneralFollowerSolver::defineSequenceWithMetropolisHastings(){
                 else expr += (r - 1.0)*var.obj_leader*y[s-1][i];
             }
             expr -= (r - 1.0) * (Fw + Fs) / 2.0;
-            expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*(alpha[s]/numeric);
+            expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric));
 
             leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, expr <= 0.0);
-            leader->getGRBModel()->addGenConstrIndicator(q[s], 0.0, expr >= 0.1);
+            leader->getGRBModel()->addGenConstrIndicator(q[s], 0.0, expr >= 0.0 + input.getEpsBigM());
         }
     }
 
@@ -212,12 +232,13 @@ void DepGeneralFollowerSolver::defineSequenceWithMetropolisHastings(){
         // Define acceptance variables in fragile case.
         for(int s = 0; s < instance.getNbScenarios(); ++s){
             double r = instance.getGeneralAccep(pr,s);
+            double tau = instance.getGeneralStep(pr,s);
 
             GRBLinExpr expr = 0;
             for(int k = 0; k < input.getNbIntervalsGeneral(); ++k)
                 expr += (std::log(r) / input.getIntCoeffGeneral(k))*w_delta[k];
 
-            expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*(alpha[s]/numeric);
+            expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric));
 
             leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, expr <= 0.0);
             leader->getGRBModel()->addGenConstrIndicator(q[s], 0.0, expr >= 0.0 + input.getEpsBigM());
@@ -245,6 +266,7 @@ void DepGeneralFollowerSolver::defineSequenceWithMetropolisHastings(){
 
             // Now defining constraint.
             double r = instance.getGeneralAccep(pr,s);
+            double tau = instance.getGeneralStep(pr,s);
 
             GRBLinExpr expr = 0;
             for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
@@ -257,7 +279,7 @@ void DepGeneralFollowerSolver::defineSequenceWithMetropolisHastings(){
                     expr += (std::pow(r, 1.0/input.getIntCoeffPowerStrGeneral(k)) - 1.0) * w_s[k];
                 }
             }
-            expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*(alpha[s]/numeric);
+            expr -= instance.getGeneralCoeffAlphaObjLeader(pr,s)*((1.0 - tau)*(alpha_min[s]/numeric) + tau*(alpha_max[s]/numeric));
             
             leader->getGRBModel()->addGenConstrIndicator(q[s], 1.0, expr <= 0.0);
             leader->getGRBModel()->addGenConstrIndicator(q[s], 0.0, expr >= 0.0 + input.getEpsBigM());
@@ -284,37 +306,81 @@ void DepGeneralFollowerSolver::defineSequenceWithSliceSampling(){
 
                 if((instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k)) >= (1e-12)){
                     // Constraint defines alpha_min.
-                    if(relaxation == false) leader->getGRBModel()->addConstr(b_alpha_max[s][index_max] <= 1.0 - w[k]);
                     leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (alpha_min[s]/numeric) >= expr);
-                    if(relaxation == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_min], 1.0, (alpha_min[s]/numeric) <= expr);
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == instance.getStepSizeInterval());
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addConstr(b_alpha_max[s][index_max] <= 1.0 - w[k]);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_min], 1.0, (alpha_min[s]/numeric) <= expr);
                 }
 
                 if((instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k) <= (-1e-12))){
                     // Constraint defines alpha_max.   
-                    if(relaxation == false) leader->getGRBModel()->addConstr(b_alpha_min[s][index_min] <= 1.0 - w[k]); 
                     leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (alpha_max[s]/numeric) <= expr);
-                    if(relaxation == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_max], 1.0, (alpha_max[s]/numeric) >= expr);
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == -instance.getStepSizeInterval());
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == -instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addConstr(b_alpha_min[s][index_min] <= 1.0 - w[k]); 
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_max], 1.0, (alpha_max[s]/numeric) >= expr);
                 }
             }
         }
 
         if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenFragile){
+            GRBLinExpr expr_alpha_min = 0;
+            GRBLinExpr expr_alpha_max = 0;
             for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
                 GRBLinExpr expr = (w_delta[k]*std::log(instance.getGeneralAccep(pr,s))) / 
                                   (input.getIntCoeffGeneral(k)*instance.getGeneralCoeffAlphaObjLeader(pr,s));
 
                 if((instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k)) >= (1e-12)){
-                    if(relaxation == false) leader->getGRBModel()->addConstr(b_alpha_max[s][index_max] <= 1.0 - w[k]);
                     leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (alpha_min[s]/numeric) >= expr);
-                    if(relaxation == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_min], 1.0, (alpha_min[s]/numeric) <= expr); 
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == instance.getStepSizeInterval());
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == instance.getStepSizeInterval());
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addConstr(b_alpha_max[s][index_max] <= 1.0 - w[k]);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_min], 1.0, (alpha_min[s]/numeric) <= expr); 
+                    
+                    expr_alpha_min += (w_delta[k]*std::log(instance.getGeneralAccep(pr,s))) / 
+                                      (input.getIntCoeffGeneral(k)*instance.getGeneralCoeffAlphaObjLeader(pr,s));
+                    expr_alpha_max += w[k]*instance.getStepSizeInterval();
                 }
 
                 if((instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k) <= (-1e-12))){
-                    if(relaxation == false) leader->getGRBModel()->addConstr(b_alpha_min[s][index_min] <= 1.0 - w[k]);
                     leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (alpha_max[s]/numeric) <= expr);
-                    if(relaxation == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_max], 1.0, (alpha_max[s]/numeric) >= expr);
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == -instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == -instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addConstr(b_alpha_min[s][index_min] <= 1.0 - w[k]);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_max], 1.0, (alpha_max[s]/numeric) >= expr);
+                    
+                    expr_alpha_min += w[k]*(-instance.getStepSizeInterval());
+                    expr_alpha_max += (w_delta[k]*std::log(instance.getGeneralAccep(pr,s))) / 
+                                      (input.getIntCoeffGeneral(k)*instance.getGeneralCoeffAlphaObjLeader(pr,s));
                 }
             }
+
+            // leader->getGRBModel()->addConstr((alpha_min[s]/numeric) >= expr_alpha_min);
+            // leader->getGRBModel()->addConstr((alpha_max[s]/numeric) <= expr_alpha_max);
+
+            // if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][index_min]/numeric) == expr_alpha_min);
+            // if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][index_max]/numeric) == expr_alpha_max);
         }
 
         if(input.getTypeDepGeneral() == Input::TypesDepGeneral::GenFragilePower || 
@@ -328,10 +394,21 @@ void DepGeneralFollowerSolver::defineSequenceWithSliceSampling(){
             }
 
             GRBVar * w_s = leader->getGRBModel()->addVars(input.getNbIntervalsGeneral(),GRB_CONTINUOUS);
+            double bigm = (leader->getGeneralUB() - leader->getGeneralLB())/2.0;
+            // double bigm = (instance.getModel()->leader_ub - instance.getModel()->leader_lb)/2.0;
+            
             for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
-                leader->getGRBModel()->addGenConstrIndicator(w[k], 0.0, w_s[k] == 0.0);
-                leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, w_s[k] == leader_obj_s - (Fw + Fs)/2.0);
+                leader->getGRBModel()->addConstr(w_s[k] <=  bigm*w[k]);
+                leader->getGRBModel()->addConstr(w_s[k] >= -bigm*w[k]);
+                leader->getGRBModel()->addConstr(w_s[k] <=  leader_obj_s - (Fw + Fs)/2.0 + bigm*(1.0 - w[k]));
+                leader->getGRBModel()->addConstr(w_s[k] >=  leader_obj_s - (Fw + Fs)/2.0 - bigm*(1.0 - w[k]));
+
+                // leader->getGRBModel()->addGenConstrIndicator(w[k], 0.0, w_s[k] == 0.0);
+                // leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, w_s[k] == leader_obj_s - (Fw + Fs)/2.0);
             }
+
+            GRBLinExpr expr_alpha_min = 0;
+            GRBLinExpr expr_alpha_max = 0;
 
             for(int k = 0; k < input.getNbIntervalsGeneral(); ++k){
                 double u = 0.0;
@@ -344,169 +421,60 @@ void DepGeneralFollowerSolver::defineSequenceWithSliceSampling(){
                                   (w_s[k]*u) / (instance.getGeneralCoeffAlphaObjLeader(pr,s));
                 
                 if((instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k)) >= (1e-12)){
-                    if(relaxation == false) leader->getGRBModel()->addConstr(b_alpha_max[s][index_max] <= 1.0 - w[k]);
                     leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (alpha_min[s]/numeric) >= expr);
-                    if(relaxation == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_min], 1.0, (alpha_min[s]/numeric) <= expr); 
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == instance.getStepSizeInterval());
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true)  leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addConstr(b_alpha_max[s][index_max] <= 1.0 - w[k]);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_min], 1.0, (alpha_min[s]/numeric) <= expr); 
+                    
+                    expr_alpha_min += (w_delta[k]*0.5*u) / (instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k)) +
+                                      (w_s[k]*u) / (instance.getGeneralCoeffAlphaObjLeader(pr,s));
+                    expr_alpha_max += w[k]*instance.getStepSizeInterval();
                 }
 
                 if((instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k) <= (-1e-12))){
-                    if(relaxation == false) leader->getGRBModel()->addConstr(b_alpha_min[s][index_min] <= 1.0 - w[k]);
                     leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (alpha_max[s]/numeric) <= expr);
-                    if(relaxation == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_max], 1.0, (alpha_max[s]/numeric) >= expr);
-                }
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == -instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_max[s][index_max]/numeric) == expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrIndicator(w[k], 1.0, (bound_alpha_min[s][index_min]/numeric) == -instance.getStepSizeInterval());
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addConstr(b_alpha_min[s][index_min] <= 1.0 - w[k]);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_max], 1.0, (alpha_max[s]/numeric) >= expr);
+                    
+                    expr_alpha_min += w[k]*(-instance.getStepSizeInterval());
+                    expr_alpha_max += (w_delta[k]*0.5*u) / (instance.getGeneralCoeffAlphaObjLeader(pr,s)*input.getIntCoeffSignalGeneral(k)) +
+                                      (w_s[k]*u) / (instance.getGeneralCoeffAlphaObjLeader(pr,s));
+                }  
             }
+
+            // leader->getGRBModel()->addConstr((alpha_min[s]/numeric) >= expr_alpha_min);
+            // leader->getGRBModel()->addConstr((alpha_max[s]/numeric) <= expr_alpha_max);
+
+            // if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][index_min]/numeric) == expr_alpha_min);
+            // if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][index_max]/numeric) == expr_alpha_max);
         }
     }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void DepGeneralFollowerSolver::defineNewExplicitStep(){
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        // Define primal constraints and slacks.
-        GRBVar * slacks = NULL;    
-        GRBVar * slack_lbs = NULL;
-        GRBVar * slack_ubs = NULL;
-        if(s == 0) definePrimalConstrs(yi,slacks,slack_lbs,slack_ubs,false,"_"+std::to_string(s+1));
-        else definePrimalConstrs(y[s-1],slacks,slack_lbs,slack_ubs,false,"_"+std::to_string(s+1));
-
-        GRBVar slack_eps, f_eps;
-        if(input.isFollowerNearOpt() == true){
-            if(s == 0) defineFollowerNearOptimalObj(f_eps,yi,slack_eps,"_" + std::to_string(s+1));
-            else defineFollowerNearOptimalObj(f_eps,y[s-1],slack_eps,"_" + std::to_string(s+1));
-        } else {
-            if(s == 0) defineFollowerOptimalObj(yi,"_" + std::to_string(s+1));
-            else defineFollowerOptimalObj(y[s-1],"_" + std::to_string(s+1));
-        }
- 
-        if(instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12 && relaxation == false){
-            // Binary variable defining best lower bound on alpha_min.
-            b_alpha_min[s] =  leader->getGRBModel()->addVars(getNbConstrsMin(s),GRB_BINARY);
-
-            GRBLinExpr sum_expr = 0;
-            for(int i = 0; i < getNbConstrsMin(s); ++i) sum_expr += b_alpha_min[s][i];
-            leader->getGRBModel()->addConstr(sum_expr == 1);
-        }
-        if(instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12 && relaxation == false){
-            // Binary variable defining best upper bound on alpha_max.
-            b_alpha_max[s] =  leader->getGRBModel()->addVars(getNbConstrsMax(s),GRB_BINARY);
-
-            GRBLinExpr sum_expr_max = 0;
-            for(int i = 0; i < getNbConstrsMax(s); ++i) sum_expr_max += b_alpha_max[s][i];
-            leader->getGRBModel()->addConstr(sum_expr_max == 1);
-        }
-
-        for(int j = 0; j < instance.getGeneralNbConstrsAlpha(pr,s,0); ++j){
-            int c = instance.getGeneralConstrsAlpha(pr,s,0,j);
-            if(c != instance.getModel()->nb_follower_constrs){
-                BilevelConstraint constr = instance.getModel()->follower_constrs[c];
-                if(constr.sense == '<') {
-                    leader->getGRBModel()->addConstr(instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_min[s]/numeric) <= slacks[c]);
-                    if(instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12 && relaxation == false){
-                        leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_min[s]/numeric) >= slacks[c] - 1e-6);
-                    }
-                }else if(constr.sense == '>'){ 
-                    leader->getGRBModel()->addConstr(instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_min[s]/numeric) >= -slacks[c]);
-                    if(instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12 && relaxation == false){
-                        leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_min[s]/numeric) <= -slacks[c] + 1e-6);
-                    }
-                }
-            }else{
-                leader->getGRBModel()->addConstr(instance.getGeneralCoeffAlphaObjFollower(pr,s)*(alpha_min[s]/numeric) <= slack_eps);
-                if(instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12 && relaxation == false){
-                    leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, instance.getGeneralCoeffAlphaObjFollower(pr,s)*(alpha_min[s]/numeric) >= slack_eps - 1e-6);
-                }
-            }
-        }
-        for(int j = 0; j < instance.getGeneralNbBdlbsAlpha(pr,s,0); ++j){
-            int i = instance.getGeneralBdlbsAlpha(pr,s,0,j);
-            leader->getGRBModel()->addConstr(instance.getGeneralDirection(pr,s,i)*(alpha_min[s]/numeric) >= -slack_lbs[i]);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-            if(instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12 && relaxation == false){
-                leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][instance.getGeneralNbConstrsAlpha(pr,s,0)+j], 1, instance.getGeneralDirection(pr,s,i)*(alpha_min[s]/numeric) <= -slack_lbs[i] + 1e-6);
-            }
-        }
-        for(int j = 0; j < instance.getGeneralNbBdubsAlpha(pr,s,0); ++j){
-            int i = instance.getGeneralBdubsAlpha(pr,s,0,j);
-            leader->getGRBModel()->addConstr(instance.getGeneralDirection(pr,s,i)*(alpha_min[s]/numeric) <= slack_ubs[i]);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-            if(instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12 && relaxation == false){
-                leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][instance.getGeneralNbConstrsAlpha(pr,s,0)+instance.getGeneralNbBdlbsAlpha(pr,s,0)+j], 1, instance.getGeneralDirection(pr,s,i)*(alpha_min[s]/numeric) >= slack_ubs[i] - 1e-6);
-            }
-        }
-        if((instance.getGeneralCoeffAlphaObjLeader(pr,s) <= -1e-12) && relaxation == false){
-            int index = instance.getGeneralNbConstrsAlpha(pr,s,0) + 
-                        instance.getGeneralNbBdlbsAlpha(pr,s,0) + 
-                        instance.getGeneralNbBdubsAlpha(pr,s,0);
-            leader->getGRBModel()->addConstr((alpha_min[s]/numeric) <= -instance.getStepSizeInterval()*b_alpha_min[s][index]);
-        }
-                
-        for(int j = 0; j < instance.getGeneralNbConstrsAlpha(pr,s,1); ++j){
-            int c = instance.getGeneralConstrsAlpha(pr,s,1,j);
-            if(c != instance.getModel()->nb_follower_constrs){
-                BilevelConstraint constr = instance.getModel()->follower_constrs[c];
-                if(constr.sense == '<') {
-                    leader->getGRBModel()->addConstr(instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_max[s]/numeric) <= slacks[c]);
-                    if(instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12 && relaxation == false){
-                        leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_max[s]/numeric) >= slacks[c] - 1e-6);
-                    }
-                }else if(constr.sense == '>'){ 
-                    leader->getGRBModel()->addConstr(instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_max[s]/numeric) >= -slacks[c]);
-                    if((instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12) && relaxation == false){
-                        leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_max[s]/numeric) <= -slacks[c] + 1e-6);
-                    }
-                }
-            }else{
-                leader->getGRBModel()->addConstr(instance.getGeneralCoeffAlphaObjFollower(pr,s)*(alpha_max[s]/numeric) <= slack_eps);
-                if((instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12) && relaxation == false){
-                    leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, instance.getGeneralCoeffAlphaObjFollower(pr,s)*(alpha_max[s]/numeric) >= slack_eps - 1e-6);
-                }
-            }
-        }
-        for(int j = 0; j < instance.getGeneralNbBdlbsAlpha(pr,s,1); ++j){
-            int i = instance.getGeneralBdlbsAlpha(pr,s,1,j);
-            leader->getGRBModel()->addConstr(instance.getGeneralDirection(pr,s,i)*(alpha_max[s]/numeric) >= -slack_lbs[i]);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-            if((instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12) && relaxation == false){
-                leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][instance.getGeneralNbConstrsAlpha(pr,s,1)+j], 1, instance.getGeneralDirection(pr,s,i)*(alpha_max[s]/numeric) <= -slack_lbs[i] + 1e-6);
-            }
-        }
-        for(int j = 0; j < instance.getGeneralNbBdubsAlpha(pr,s,1); ++j){
-            int i = instance.getGeneralBdubsAlpha(pr,s,1,j);
-            leader->getGRBModel()->addConstr(instance.getGeneralDirection(pr,s,i)*(alpha_max[s]/numeric) <= slack_ubs[i]);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-            if((instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12) && relaxation == false){
-                leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][instance.getGeneralNbConstrsAlpha(pr,s,1)+instance.getGeneralNbBdlbsAlpha(pr,s,1)+j], 1, instance.getGeneralDirection(pr,s,i)*(alpha_max[s]/numeric) >= slack_ubs[i] - 1e-6);
-            }
-        }
-        if((instance.getGeneralCoeffAlphaObjLeader(pr,s) >= 1e-12) && relaxation == false){
-            int index_max = instance.getGeneralNbConstrsAlpha(pr,s,1) + 
-                        instance.getGeneralNbBdlbsAlpha(pr,s,1) + 
-                        instance.getGeneralNbBdubsAlpha(pr,s,1);
-            leader->getGRBModel()->addConstr((alpha_max[s]/numeric) >= instance.getStepSizeInterval()*b_alpha_max[s][index_max]);
-        }
-    }
-}
-
 void DepGeneralFollowerSolver::defineExplicitStep(){
     // Define constraints for alpha_min.
     for(int s = 0; s < instance.getNbScenarios(); ++s) {
-
         int nb_constrs_min = getNbConstrsMin(s);
 
         // Binary variable defining best lower bound on alpha_min.
-        if(relaxation == false) b_alpha_min[s] = leader->getGRBModel()->addVars(nb_constrs_min,GRB_BINARY);
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false) {
+            b_alpha_min[s] = leader->getGRBModel()->addVars(nb_constrs_min,GRB_BINARY);
 
-        // Continuous variable defining bounds.
-        if(relaxation == false && lazy_callback == true){
-            bound_alpha_min[s] = leader->getGRBModel()->addVars(nb_constrs_min,GRB_CONTINUOUS);
-            for(int i = 0; i < nb_constrs_min; ++i){
-                bound_alpha_min[s][i].set(GRB_DoubleAttr_LB,-GRB_INFINITY);
-                bound_alpha_min[s][i].set(GRB_DoubleAttr_UB,0.0);
-            }
-        }
-
-        if(relaxation == false){
             GRBLinExpr sum_expr = 0;
             for(int i = 0; i < nb_constrs_min; ++i) sum_expr += b_alpha_min[s][i];
             leader->getGRBModel()->addConstr(sum_expr == 1);
@@ -520,12 +488,15 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
             leader->getGRBModel()->addSOS(v.data(), w.data(), nb_constrs_min, GRB_SOS_TYPE1);
         }
 
-        // GRBVar * slack_alpha_min = leader->getGRBModel()->addVars(nb_constrs_min,GRB_CONTINUOUS);
-        // for(int i = 0; i < nb_constrs_min; ++i){
-        //     GRBVar v[2] = {slack_alpha_min[i], b_alpha_min[s][i]};
-        //     double w[2] = {1.0, 2.0};
-        //     leader->getGRBModel()->addSOS(v, w, 2, GRB_SOS_TYPE1);  
-        // }
+        // Continuous variable defining bounds.
+        if((input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) ||
+          (input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true)){
+            bound_alpha_min[s] = leader->getGRBModel()->addVars(nb_constrs_min,GRB_CONTINUOUS);
+            for(int i = 0; i < nb_constrs_min; ++i){
+                bound_alpha_min[s][i].set(GRB_DoubleAttr_LB,-GRB_INFINITY);
+                bound_alpha_min[s][i].set(GRB_DoubleAttr_UB,0.0);
+            }
+        }
 
         // Constraints impacting alpha_min.
         for(int j = 0; j < instance.getGeneralNbConstrsAlpha(pr,s,0); ++j){
@@ -550,17 +521,19 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                 
                 if(constr.sense == '<'){
                     leader->getGRBModel()->addConstr(expr <= constr.rhs);
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr >= constr.rhs - 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr >= constr.rhs - (constr.rhs - constr.bound)*(1.0 - b_alpha_min[s][j])); 
-                    // leader->getGRBModel()->addConstr(expr + slack_alpha_min[j] == constr.rhs);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr >= constr.rhs - 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr >= constr.rhs - (constr.rhs - constr.bound)*(1.0 - b_alpha_min[s][j])); 
                 }
                 if(constr.sense == '>'){
                     leader->getGRBModel()->addConstr(expr >= constr.rhs);
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr <= constr.rhs + 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr <= constr.rhs + (constr.bound - constr.rhs)*(1.0 - b_alpha_min[s][j]));
-                    // leader->getGRBModel()->addConstr(expr - slack_alpha_min[j] == constr.rhs);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr <= constr.rhs + 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr <= constr.rhs + (constr.bound - constr.rhs)*(1.0 - b_alpha_min[s][j]));
                 }
             }
             // Near optimality constraint.
@@ -577,17 +550,18 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                 if(input.isNearOptMult() == true){
                     bound_expr += ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub)/instance.getGeneralCoeffAlphaObjFollower(pr,s);
                     leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - instance.getModel()->follower_ub*(1.0 - b_alpha_min[s][j]));
-                    // leader->getGRBModel()->addConstr(expr + slack_alpha_min[j] == (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - instance.getModel()->follower_ub*(1.0 - b_alpha_min[s][j]));
                 }else{
                     bound_expr += (fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))/instance.getGeneralCoeffAlphaObjFollower(pr,s);
                     leader->getGRBModel()->addConstr(expr <= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - (instance.getModel()->follower_ub + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))*(1.0 - b_alpha_min[s][j]));
-                    // leader->getGRBModel()->addConstr(expr + slack_alpha_min[j] == fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][j], 1, expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - (instance.getModel()->follower_ub + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))*(1.0 - b_alpha_min[s][j]));
                 }
             }
         }
@@ -600,16 +574,16 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
             int index_lb = instance.getGeneralNbConstrsAlpha(pr,s,0);
             if(s == 0){
                 leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) >= var.lb);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_min[s][index_lb+j]/numeric) == var.lb);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_lb+j], 1, yi[i] + dir*(alpha_min[s]/numeric) <= var.lb + 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_min[s][index_lb+j]));
-                // leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) - slack_alpha_min[index_lb+j] == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_min[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_min[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_lb+j], 1, yi[i] + dir*(alpha_min[s]/numeric) <= var.lb + 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_min[s][index_lb+j]));
             }else{
                 leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) >= var.lb);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_min[s][index_lb+j]/numeric) == var.lb);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_lb+j], 1, y[s-1][i] + dir*(alpha_min[s]/numeric) <= var.lb + 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_min[s][index_lb+j]));
-                // leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) - slack_alpha_min[index_lb+j] == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_min[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_min[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_lb+j], 1, y[s-1][i] + dir*(alpha_min[s]/numeric) <= var.lb + 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_min[s][index_lb+j]));
             }  
         }
         // Upper bound constraints defining alpha_min.
@@ -618,19 +592,19 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
             BilevelVariable var = instance.getModel()->follower_vars[i];
             
             double dir = instance.getGeneralDirection(pr,s,i);
-            int index_ub = instance.getGeneralNbConstrsAlpha(pr,s,0)+instance.getGeneralNbBdlbsAlpha(pr,s,0);
+            int index_ub = instance.getGeneralNbConstrsAlpha(pr,s,0) + instance.getGeneralNbBdlbsAlpha(pr,s,0);
             if(s == 0){
                 leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) <= var.ub);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_min[s][index_ub+j]/numeric) == var.ub);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_ub+j], 1, yi[i] + dir*(alpha_min[s]/numeric) >= var.ub - 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) >= var.ub - (var.ub-var.lb)*(1.0 - b_alpha_min[s][index_ub+j]));
-                // leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) + slack_alpha_min[index_ub+j] == var.ub); 
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_min[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_min[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_ub+j], 1, yi[i] + dir*(alpha_min[s]/numeric) >= var.ub - 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_min[s]/numeric) >= var.ub - (var.ub-var.lb)*(1.0 - b_alpha_min[s][index_ub+j]));
             }else{
                 leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) <= var.ub);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_min[s][index_ub+j]/numeric) == var.ub);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_ub+j], 1, y[s-1][i] + dir*(alpha_min[s]/numeric) >= var.ub - 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) >= var.ub - (var.ub - var.lb)*(1.0 - b_alpha_min[s][index_ub+j]));
-                // leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) + slack_alpha_min[index_ub+j] == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_min[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_min[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_min[s][index_ub+j], 1, y[s-1][i] + dir*(alpha_min[s]/numeric) >= var.ub - 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_min[s]/numeric) >= var.ub - (var.ub - var.lb)*(1.0 - b_alpha_min[s][index_ub+j]));
             }
         }
         // Lower bound on alpha_min.
@@ -638,27 +612,21 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                     instance.getGeneralNbBdlbsAlpha(pr,s,0) + 
                     instance.getGeneralNbBdubsAlpha(pr,s,0);
         leader->getGRBModel()->addConstr((alpha_min[s]/numeric) >= -instance.getStepSizeInterval());
-        if(relaxation == false) leader->getGRBModel()->addConstr((alpha_min[s]/numeric) <= -instance.getStepSizeInterval()*b_alpha_min[s][index]);
-        if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][index]/numeric) == -instance.getStepSizeInterval());
-        // leader->getGRBModel()->addConstr((alpha_min[s]/numeric) - slack_alpha_min[index] == -instance.getStepSizeInterval());
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel) leader->getGRBModel()->addConstr((alpha_min[s]/numeric) <= -instance.getStepSizeInterval()*b_alpha_min[s][index]);
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_min[s][index]/numeric) == -instance.getStepSizeInterval());
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_min[s][index]/numeric) == -instance.getStepSizeInterval());
+
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrMax(alpha_min[s], bound_alpha_min[s], nb_constrs_min, -instance.getStepSizeInterval()*numeric);
     }
 
     // Define constraints for alpha_max.
     for(int s = 0; s < instance.getNbScenarios(); ++s) {
         int nb_constrs_max = getNbConstrsMax(s);
 
-        if(relaxation == false) b_alpha_max[s] =  leader->getGRBModel()->addVars(nb_constrs_max,GRB_BINARY);
+        // Binary variable defining best upper bound on alpha_max.
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel){
+            b_alpha_max[s] =  leader->getGRBModel()->addVars(nb_constrs_max,GRB_BINARY);
 
-        // Continuous variable defining bounds.
-        if(relaxation == false && lazy_callback == true){
-            bound_alpha_max[s] = leader->getGRBModel()->addVars(nb_constrs_max,GRB_CONTINUOUS);
-            for(int i = 0; i < nb_constrs_max; ++i){
-                bound_alpha_max[s][i].set(GRB_DoubleAttr_LB,0.0);
-                bound_alpha_max[s][i].set(GRB_DoubleAttr_UB,GRB_INFINITY);
-            }
-        }
-
-        if(relaxation == false){
             GRBLinExpr sum_expr = 0;
             for(int i = 0; i < nb_constrs_max; ++i) sum_expr += b_alpha_max[s][i];
             leader->getGRBModel()->addConstr(sum_expr == 1);
@@ -672,12 +640,15 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
             leader->getGRBModel()->addSOS(v.data(), w.data(), nb_constrs_max, GRB_SOS_TYPE1);
         }
 
-        // GRBVar * slack_alpha_max = leader->getGRBModel()->addVars(nb_constrs_max,GRB_CONTINUOUS);
-        // for(int i = 0; i < nb_constrs_max; ++i){
-        //     GRBVar v[2] = {slack_alpha_max[i], b_alpha_max[s][i]};
-        //     double w[2] = {1.0, 2.0};
-        //     leader->getGRBModel()->addSOS(v, w, 2, GRB_SOS_TYPE1);  
-        // }
+        // Continuous variable defining bounds on alpha_max.
+        if((input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) ||
+           (input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true)){
+            bound_alpha_max[s] = leader->getGRBModel()->addVars(nb_constrs_max,GRB_CONTINUOUS);
+            for(int i = 0; i < nb_constrs_max; ++i){
+                bound_alpha_max[s][i].set(GRB_DoubleAttr_LB,0.0);
+                bound_alpha_max[s][i].set(GRB_DoubleAttr_UB,GRB_INFINITY);
+            }
+        }
 
         // Constraints impacting alpha_max.
         for(int j = 0; j < instance.getGeneralNbConstrsAlpha(pr,s,1); ++j){
@@ -702,17 +673,17 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                 
                 if(constr.sense == '<'){
                     leader->getGRBModel()->addConstr(expr <= constr.rhs);
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr >= constr.rhs - 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr >= constr.rhs - (constr.rhs - constr.bound)*(1.0 - b_alpha_max[s][j]));
-                    // leader->getGRBModel()->addConstr(expr + slack_alpha_max[j] == constr.rhs);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr >= constr.rhs - 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr >= constr.rhs - (constr.rhs - constr.bound)*(1.0 - b_alpha_max[s][j]));
                 }
                 if(constr.sense == '>'){
                     leader->getGRBModel()->addConstr(expr >= constr.rhs);
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr <= constr.rhs + 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr <= constr.rhs + (constr.bound - constr.rhs)*(1.0 - b_alpha_max[s][j]));
-                    // leader->getGRBModel()->addConstr(expr - slack_alpha_max[j] == constr.rhs);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr <= constr.rhs + 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr <= constr.rhs + (constr.bound - constr.rhs)*(1.0 - b_alpha_max[s][j]));
                 }
             }
             // Near optimality constraint.
@@ -729,16 +700,17 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                 if(input.isNearOptMult() == true){
                     bound_expr += ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub)/instance.getGeneralCoeffAlphaObjFollower(pr,s);
                     leader->getGRBModel()->addConstr(expr <= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub);
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - instance.getModel()->follower_ub*(1.0 - b_alpha_max[s][j]));
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr >= (1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - instance.getModel()->follower_ub*(1.0 - b_alpha_max[s][j]));
                 }else{
                     bound_expr += (fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))/instance.getGeneralCoeffAlphaObjFollower(pr,s);
                     leader->getGRBModel()->addConstr(expr <= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
-                    if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
-                    if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - 1e-6);
-                    if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - (instance.getModel()->follower_ub + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))*(1.0 - b_alpha_max[s][j]));
-                    // leader->getGRBModel()->addConstr(expr + slack_alpha_max[j] == fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb));
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][j]/numeric) == bound_expr);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][j], 1, expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - 1e-6);
+                    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(expr >= fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - (instance.getModel()->follower_ub + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))*(1.0 - b_alpha_max[s][j]));
                 }
             }
         }
@@ -751,16 +723,16 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
             int index_lb = instance.getGeneralNbConstrsAlpha(pr,s,1);
             if(s == 0){
                 leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) >= var.lb);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_max[s][index_lb+j]/numeric) == var.lb);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_lb+j], 1, yi[i] + dir*(alpha_max[s]/numeric) <= var.lb + 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_lb+j]));
-                // leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) - slack_alpha_max[index_lb+j] == var.lb);                 
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_max[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_max[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_lb+j], 1, yi[i] + dir*(alpha_max[s]/numeric) <= var.lb + 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_lb+j]));                
             }else{
                 leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) >= var.lb);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_max[s][index_lb+j]/numeric) == var.lb);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_lb+j], 1, y[s-1][i] + dir*(alpha_max[s]/numeric) <= var.lb + 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_lb+j]));
-                // leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) - slack_alpha_max[index_lb+j] == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_max[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_max[s][index_lb+j]/numeric) == var.lb);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_lb+j], 1, y[s-1][i] + dir*(alpha_max[s]/numeric) <= var.lb + 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) <= var.lb + (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_lb+j]));
             }  
         }
         // Upper bound constraints defining alpha_max.
@@ -772,16 +744,16 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
             int index_ub = instance.getGeneralNbConstrsAlpha(pr,s,1)+instance.getGeneralNbBdlbsAlpha(pr,s,1);
             if(s == 0){
                 leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) <= var.ub);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_max[s][index_ub+j]/numeric) == var.ub);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_ub+j], 1, yi[i] + dir*(alpha_max[s]/numeric) >= var.ub - 1e-6);    
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) >= var.ub - (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_ub+j]));
-                // leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) + slack_alpha_max[index_ub+j] == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_max[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(yi[i] + dir*(bound_alpha_max[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_ub+j], 1, yi[i] + dir*(alpha_max[s]/numeric) >= var.ub - 1e-6);    
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(yi[i] + dir*(alpha_max[s]/numeric) >= var.ub - (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_ub+j]));
             }else{
                 leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) <= var.ub);
-                if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_max[s][index_ub+j]/numeric) == var.ub);
-                if(relaxation == false && lazy_callback == false && bigm == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_ub+j], 1, y[s-1][i] + dir*(alpha_max[s]/numeric) >= var.ub - 1e-6);
-                if(relaxation == false && lazy_callback == false && bigm == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) >= var.ub - (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_ub+j]));
-                // leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) + slack_alpha_max[index_ub+j] == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_max[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(bound_alpha_max[s][index_ub+j]/numeric) == var.ub);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == false) leader->getGRBModel()->addGenConstrIndicator(b_alpha_max[s][index_ub+j], 1, y[s-1][i] + dir*(alpha_max[s]/numeric) >= var.ub - 1e-6);
+                if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == false && big_m == true) leader->getGRBModel()->addConstr(y[s-1][i] + dir*(alpha_max[s]/numeric) >= var.ub - (var.ub - var.lb)*(1.0 - b_alpha_max[s][index_ub+j]));
             }
         }
         // Upper bound on alpha_max.
@@ -789,154 +761,12 @@ void DepGeneralFollowerSolver::defineExplicitStep(){
                     instance.getGeneralNbBdlbsAlpha(pr,s,1) + 
                     instance.getGeneralNbBdubsAlpha(pr,s,1);
         leader->getGRBModel()->addConstr((alpha_max[s]/numeric) <= instance.getStepSizeInterval());
-        if(relaxation == false) leader->getGRBModel()->addConstr((alpha_max[s]/numeric) >= instance.getStepSizeInterval()*b_alpha_max[s][index]);
-        if(relaxation == false && lazy_callback == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][index]/numeric) == instance.getStepSizeInterval());
-        // leader->getGRBModel()->addConstr((alpha_max[s]/numeric) + slack_alpha_max[index] == instance.getStepSizeInterval());
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel) leader->getGRBModel()->addConstr((alpha_max[s]/numeric) >= instance.getStepSizeInterval()*b_alpha_max[s][index]);
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty) leader->getGRBModel()->addConstr((bound_alpha_max[s][index]/numeric) == instance.getStepSizeInterval());
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addConstr((bound_alpha_max[s][index]/numeric) == instance.getStepSizeInterval());
+
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel && grb_minmax == true) leader->getGRBModel()->addGenConstrMin(alpha_max[s], bound_alpha_max[s], nb_constrs_max, instance.getStepSizeInterval());
     }  
-}
-
-void DepGeneralFollowerSolver::defineExplicitStepMaxMinConstr(){
-    for(int s = 0; s < instance.getNbScenarios(); ++s) {
-        // Alpha_min.
-        int nb_constrs_min = instance.getGeneralNbConstrsAlpha(pr,s,0) + 
-                             instance.getGeneralNbBdlbsAlpha(pr,s,0) + 
-                             instance.getGeneralNbBdubsAlpha(pr,s,0) + 1;
-        if((metropolis_hastings == false) && (input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral)) 
-            nb_constrs_min += 1;
-
-        GRBVar * gen_alpha_min = leader->getGRBModel()->addVars(nb_constrs_min,GRB_CONTINUOUS);
-        for(int i = 0; i < nb_constrs_min; ++i){
-            gen_alpha_min[i].set(GRB_DoubleAttr_UB,0.0);
-            gen_alpha_min[i].set(GRB_DoubleAttr_LB,-GRB_INFINITY);
-        }
-
-        // Constraints impacting alpha_min.
-        for(int j = 0; j < instance.getGeneralNbConstrsAlpha(pr,s,0); ++j){
-            int c = instance.getGeneralConstrsAlpha(pr,s,0,j);
-
-            if(c != instance.getModel()->nb_follower_constrs){
-                BilevelConstraint constr = instance.getModel()->follower_constrs[c];
-
-                GRBLinExpr expr = 0;
-                for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
-                    BilevelVariable var = instance.getModel()->leader_vars[i];  
-                    expr -= constr.coeffs[var.id]*leader->getX(i)/instance.getGeneralCoeffAlpha(pr,s,c);   
-                }
-                for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                    BilevelVariable var = instance.getModel()->follower_vars[i];
-                    if(s == 0) expr -= constr.coeffs[var.id]*yi[i]/instance.getGeneralCoeffAlpha(pr,s,c);    
-                    else expr -= constr.coeffs[var.id]*y[s-1][i]/instance.getGeneralCoeffAlpha(pr,s,c); 
-                }
-                expr += constr.rhs/instance.getGeneralCoeffAlpha(pr,s,c);
-                leader->getGRBModel()->addConstr((gen_alpha_min[j]/numeric) == expr);   
-            }else{
-                GRBLinExpr expr = 0;
-                for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                    BilevelVariable var = instance.getModel()->follower_vars[i];
-                    if(s == 0) expr -= var.obj_follower*yi[i]/instance.getGeneralCoeffAlphaObjFollower(pr,s);    
-                    else expr -= var.obj_follower*y[s-1][i]/instance.getGeneralCoeffAlphaObjFollower(pr,s);
-                }
-                if(input.isNearOptMult() == true){
-                    expr += ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub)/instance.getGeneralCoeffAlphaObjFollower(pr,s);
-                    leader->getGRBModel()->addConstr((gen_alpha_min[j]/numeric) == expr);
-                }
-                else{
-                    expr += (fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))/instance.getGeneralCoeffAlphaObjFollower(pr,s);
-                    leader->getGRBModel()->addConstr((gen_alpha_min[j]/numeric) == expr);
-                }
-            }
-        }
-        // Lower bound constraints defining alpha_min.
-        for(int j = 0; j < instance.getGeneralNbBdlbsAlpha(pr,s,0); ++j){
-            int i = instance.getGeneralBdlbsAlpha(pr,s,0,j);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-
-            double dir = instance.getGeneralDirection(pr,s,i);
-            if(s == 0) leader->getGRBModel()->addConstr((gen_alpha_min[instance.getGeneralNbConstrsAlpha(pr,s,0)+j]/numeric) == (var.lb - yi[i])/dir);
-            else leader->getGRBModel()->addConstr((gen_alpha_min[instance.getGeneralNbConstrsAlpha(pr,s,0)+j]/numeric) == (var.lb - y[s-1][i])/dir); 
-        }
-        // Upper bound constraints defining alpha_min.
-        for(int j = 0; j < instance.getGeneralNbBdubsAlpha(pr,s,0); ++j){
-            int i = instance.getGeneralBdubsAlpha(pr,s,0,j);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-
-            double dir = instance.getGeneralDirection(pr,s,i);
-            if(s == 0) leader->getGRBModel()->addConstr((gen_alpha_min[instance.getGeneralNbConstrsAlpha(pr,s,0)+instance.getGeneralNbBdlbsAlpha(pr,s,0)+j]/numeric) == (var.ub - yi[i])/dir);    
-            else leader->getGRBModel()->addConstr((gen_alpha_min[instance.getGeneralNbConstrsAlpha(pr,s,0)+instance.getGeneralNbBdlbsAlpha(pr,s,0)+j]/numeric) == (var.ub - y[s-1][i])/dir);
-        }
-        leader->getGRBModel()->addGenConstrMax(alpha_min[s], gen_alpha_min, nb_constrs_min, -instance.getStepSizeInterval()*numeric);
-        
-        // Alpha_max.
-        int nb_constrs_max = instance.getGeneralNbConstrsAlpha(pr,s,1) + 
-                                 instance.getGeneralNbBdlbsAlpha(pr,s,1) + 
-                                 instance.getGeneralNbBdubsAlpha(pr,s,1) + 1;
-            if((metropolis_hastings == false) && (input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral)) 
-                nb_constrs_max += 1;
-            
-        GRBVar * gen_alpha_max = leader->getGRBModel()->addVars(nb_constrs_max,GRB_CONTINUOUS);
-        for(int i = 0; i < nb_constrs_max; ++i){
-            gen_alpha_max[i].set(GRB_DoubleAttr_LB,0.0);
-            gen_alpha_max[i].set(GRB_DoubleAttr_UB,GRB_INFINITY);
-        }
-
-        // Constraints impacting alpha_max.
-        for(int j = 0; j < instance.getGeneralNbConstrsAlpha(pr,s,1); ++j){
-            int c = instance.getGeneralConstrsAlpha(pr,s,1,j);
-            
-            // Usual follower constraints.
-            if(c != instance.getModel()->nb_follower_constrs){
-                BilevelConstraint constr = instance.getModel()->follower_constrs[c];
-
-                GRBLinExpr expr = 0;
-                for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
-                    BilevelVariable var = instance.getModel()->leader_vars[i]; 
-                    expr -= constr.coeffs[var.id]*leader->getX(i)/instance.getGeneralCoeffAlpha(pr,s,c);  
-                }
-                for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                    BilevelVariable var = instance.getModel()->follower_vars[i];
-                    if(s == 0) expr -= constr.coeffs[var.id]*yi[i]/instance.getGeneralCoeffAlpha(pr,s,c);    
-                    else expr -= constr.coeffs[var.id]*y[s-1][i]/instance.getGeneralCoeffAlpha(pr,s,c);  
-                }  
-                expr += constr.rhs/instance.getGeneralCoeffAlpha(pr,s,c);
-                leader->getGRBModel()->addConstr((gen_alpha_max[j]/numeric) == expr);
-            }
-            // Near optimality constraint.
-            else{
-                GRBLinExpr expr = 0;
-                for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                    BilevelVariable var = instance.getModel()->follower_vars[i];
-                    if(s == 0) expr -= var.obj_follower*yi[i]/instance.getGeneralCoeffAlphaObjFollower(pr,s);    
-                    else expr -= var.obj_follower*y[s-1][i]/instance.getGeneralCoeffAlphaObjFollower(pr,s);
-                }
-                if(input.isNearOptMult() == true){
-                    expr += ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub)/instance.getGeneralCoeffAlphaObjFollower(pr,s);
-                    leader->getGRBModel()->addConstr((gen_alpha_max[j]/numeric) == expr);
-                }else{
-                    expr += (fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))/instance.getGeneralCoeffAlphaObjFollower(pr,s);
-                    leader->getGRBModel()->addConstr((gen_alpha_max[j]/numeric) == expr);
-                }
-            }
-        }
-        // Lower bound constraints defining alpha_max.
-        for(int j = 0; j < instance.getGeneralNbBdlbsAlpha(pr,s,1); ++j){
-            int i = instance.getGeneralBdlbsAlpha(pr,s,1,j);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-
-            double dir = instance.getGeneralDirection(pr,s,i);
-            if(s == 0) leader->getGRBModel()->addConstr((gen_alpha_max[instance.getGeneralNbConstrsAlpha(pr,s,1)+j]/numeric) == (var.lb -yi[i])/dir);             
-            else leader->getGRBModel()->addConstr((gen_alpha_max[instance.getGeneralNbConstrsAlpha(pr,s,1)+j]/numeric) == (var.lb -y[s-1][i])/dir); 
-        }
-        // Upper bound constraints defining alpha_max.
-        for(int j = 0; j < instance.getGeneralNbBdubsAlpha(pr,s,1); ++j){
-            int i = instance.getGeneralBdubsAlpha(pr,s,1,j);
-            BilevelVariable var = instance.getModel()->follower_vars[i];
-
-            double dir = instance.getGeneralDirection(pr,s,i);
-            if(s == 0) leader->getGRBModel()->addConstr((gen_alpha_max[instance.getGeneralNbConstrsAlpha(pr,s,1)+instance.getGeneralNbBdlbsAlpha(pr,s,1)+j]/numeric) == (var.ub - yi[i])/dir);
-            else leader->getGRBModel()->addConstr((gen_alpha_max[instance.getGeneralNbConstrsAlpha(pr,s,1)+instance.getGeneralNbBdlbsAlpha(pr,s,1)+j]/numeric) == (var.ub - y[s-1][i])/dir);
-        }
-        leader->getGRBModel()->addGenConstrMin(alpha_max[s], gen_alpha_max, nb_constrs_max, instance.getStepSizeInterval());
-    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1258,8 +1088,10 @@ void DepGeneralFollowerSolver::evaluate(double & mean, double & variance, double
         x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
 
     double eval, var_eval, f_eval, f_var_eval, ess, rhat;
-    instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,leader->getX_(),yi_,Fs_,Fw_,fs_,input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
-    
+    if((std::abs(Fw_ - Fs_) <= 1e-3) && (input.isFollowerNearOpt() == true)){ eval = Fs_; var_eval = 0.0; f_eval = fs_; f_var_eval = 0.0; ess = 1.0; rhat = 1.0; }
+    else if((std::abs(Fw_ - Fs_) <= 1e-3) && (input.isFollowerNearOpt() == false) && (std::abs(fw_eps_ - fs_eps_) <= 1e-3)){ eval = Fs_; var_eval = 0.0; f_eval = fs_eps_; f_var_eval = 0.0; ess = 1.0; rhat = 1.0; }
+    else instance.evaluateDepGeneral(eval,var_eval,f_eval,f_var_eval,ess,rhat,leader->getX_(),yi_,Fs_,Fw_,fs_,input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+
     mean = x_obj_leader + eval;
     variance = var_eval;
 
@@ -1278,257 +1110,729 @@ void DepGeneralFollowerSolver::computeStrongWeakInteriorSolutions(){
 
 void DepGeneralFollowerSolver::upd_solution(){
     AbstractFollowerSolver::upd_solution();
-    
-
-    double x_obj_leader = 0.0;
-    for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
-        x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
-
-
-
-    double y_obj_leader = 0.0; 
-    instance.evaluateSAADepGeneral(y_obj_leader,alpha_,alpha_min_,b_alpha_min_,alpha_max_,b_alpha_max_,y_,
-                                    pr,leader->getX_(),yi_,Fs_,Fw_,fs_,
-                                    input.getTypeDepGeneral(),
-                                    input.getNbIntervalsGeneral(),
-                                    input.getScalingGeneral());
-    
-    std::vector<double*> sample(instance.getNbScenarios(),NULL);
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        std::cout << "scenario " << s << std::endl;
-        std::cout << "alpha_min: " << alpha_min_[s] << "|| " << alpha_min[s].get(GRB_DoubleAttr_X)/numeric << std::endl;
-        std::cout << "alpha_max: " << alpha_max_[s] << "|| " << alpha_max[s].get(GRB_DoubleAttr_X)/numeric << " "  << std::endl;
-        std::cout << "alpha: " << alpha_[s] << "||" << alpha[s].get(GRB_DoubleAttr_X)/numeric << " "  << std::endl;
-        for(int j = 0; j < getNbConstrsMin(s); ++j){
-            std::cout << bound_alpha_min[s][j].get(GRB_DoubleAttr_X) << " ";
-        }
-        std::cout << "\n";
-        for(int j = 0; j < getNbConstrsMax(s); ++j){
-            std::cout << bound_alpha_max[s][j].get(GRB_DoubleAttr_X) << " ";
-        }
-        std::cout << "\n";
-        sample[s] = leader->getGRBModel()->get(GRB_DoubleAttr_X,y[s],instance.getModel()->nb_follower_vars);
-        for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-            if(s > 0){
-                std::cout << y_[s][i] << " " << (y_[s-1][i] + instance.getGeneralDirection(pr,s,i)*alpha_[s]) << "||" << sample[s][i] << " " << (sample[s-1][i] + instance.getGeneralDirection(pr,s,i)*(alpha[s].get(GRB_DoubleAttr_X)/numeric))<< std::endl; 
+    if(leader->getNbSol() > 0){
+        if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty){
+            for(int s = 0; s < instance.getNbScenarios(); ++s){
+                if(y_[s]) delete[] y_[s];
+                y_[s] = leader->getGRBModel()->get(GRB_DoubleAttr_X,y[s],instance.getModel()->nb_follower_vars);
             }
         }
-        
-        // std::cout << "coeff:" << instance.getGeneralCoeffAlphaObjLeader(pr,s) << std::endl;
-
-        // if(alpha_min[s].get(GRB_DoubleAttr_X) <= alpha_min_[s] - 1e-12) std::cout << "Error alpha_min" << std::endl;
-        // if(alpha_max[s].get(GRB_DoubleAttr_X) >= alpha_max_[s] + 1e-12) std::cout << "Error alpha_max" << std::endl;
     }
-
-    std::cout << "real objective: " << x_obj_leader+y_obj_leader << std::endl;
-    exit(0);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+void DepGeneralFollowerSolver::solve(){
+    if(input.getMethodDepGeneral() == Input::MethodDepGeneral::SingleLevel){
+        leader->getGRBModel()->set(GRB_IntParam_Presolve, 1);
+        AbstractFollowerSolver::solve();
+    }else if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Relax){
+        leader->getGRBModel()->set(GRB_IntParam_Presolve, 1);
+        solve_relax();
+        if(leader->getNbSol() > 0) computeStrongWeakInteriorSolutions();
+    }else if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Penalty){
+        solve_penalty();
+        if(leader->getNbSol() > 0) computeStrongWeakInteriorSolutions();
+    }else if(input.getMethodDepGeneral() == Input::MethodDepGeneral::LocalSearch){
+        solve_local_search();
+        if(leader->getNbSol() > 0) computeStrongWeakInteriorSolutions();
+    }else if(input.getMethodDepGeneral() == Input::MethodDepGeneral::Callback){
+        solve_callback();
+        if(leader->getNbSol() > 0) computeStrongWeakInteriorSolutions();
+    }
+}
+
+void DepGeneralFollowerSolver::solve_relax(){
+    leader->getGRBModel()->set(GRB_IntParam_Presolve, 0);
+    
+    double start_time = time(NULL); 
+
+    // Solving relaxed version of the problem
+    leader->getGRBModel()->update();
+    leader->getGRBModel()->optimize();
+
+    leader->setStatus(statusFromGurobi(leader->getGRBModel()->get(GRB_IntAttr_Status)));
+    if(leader->getStatus() == Status::Optimal || leader->getStatus() == Status::Time_Limit) upd_solution();
+    else leader->verify_stat(); 
+
+    // Getting feasible solution.
+    if(leader->getNbSol() > 0){
+        double x_obj_leader = 0.0;
+        for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
+            x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
+
+        double y_obj_leader = 0.0;
+        instance.evaluateSAADepGeneral(y_obj_leader,pr,leader->getX_(),yi_,Fs_,Fw_,fs_,
+               input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+        
+        leader->setUB((x_obj_leader+y_obj_leader));
+    }
+
+    leader->setTime(time(NULL) - start_time);
+    if(input.getVerbose() >= 1) leader->print();
+
+}
+
+void DepGeneralFollowerSolver::solve_penalty(){
+    double start_time = time(NULL); 
+    leader->getGRBModel()->set(GRB_IntParam_OutputFlag, 0);
+
+    double best_ub = std::numeric_limits<double>::infinity();
+    double best_fs_ = std::numeric_limits<double>::infinity();;
+    double * best_x_ = new double[instance.getModel()->nb_leader_vars];
+    double * best_yi_ = new double[instance.getModel()->nb_follower_vars];
+     
+    double rho = rho_init;
+    double curr_obj = 0.0;
+
+    // Initialize problem.
+
+    // Solve first subproblem. 
+    leader->getGRBModel()->update();
+    leader->getGRBModel()->optimize();
+
+    Status sub_status = statusFromGurobi(leader->getGRBModel()->get(GRB_IntAttr_Status));
+    if(sub_status == Status::Optimal || sub_status == Status::Time_Limit) {
+        upd_solution();
+        curr_obj = leader->getGRBModel()->get(GRB_DoubleAttr_ObjVal);
+    }else leader->verify_stat();
+
+    // Solve second subproblem.
+    solve_sub_penalty(rho);
+
+    // Upper bound.
+    evaluateSAA(best_ub,best_fs_,best_x_,best_yi_);
+
+    // Iterations for penalty.
+    for(int it = 0; it < rho_max_it; ++it){
+        // Iterations for partial minima.
+        bool stop = false;
+        while(stop == false){
+            // Setting time limit.
+            leader->getGRBModel()->set(GRB_DoubleParam_TimeLimit, std::max(0.0, input.getTimeLimit() - (time(NULL) - start_time)));
+
+            // Solve first subproblem. 
+            leader->getGRBModel()->update();
+            leader->getGRBModel()->optimize();
+
+            // Get first subproblem solution.
+            double inf_norm = 0.0;
+            double prev_obj = curr_obj;
+            Status sub_status = statusFromGurobi(leader->getGRBModel()->get(GRB_IntAttr_Status));
+            if(sub_status == Status::Optimal || sub_status == Status::Time_Limit) { 
+                get_variables(inf_norm);
+                curr_obj = leader->getGRBModel()->get(GRB_DoubleAttr_ObjVal);
+            }else leader->verify_stat();
+
+            if(sub_status == Status::Time_Limit) leader->setStatus(Status::Time_Limit);
+
+            // Solve second subproblem. (dual of alpha problems).
+            solve_sub_penalty(rho);
+
+            // Compute upper bound.
+            evaluateSAA(best_ub,best_fs_,best_x_,best_yi_);
+
+            // Stop with partial minima solution or with time limit.
+            if((inf_norm <= tol_part_min) || (std::abs((curr_obj - prev_obj)) <= tol_part_min_obj) || (leader->getStatus() == Status::Time_Limit)) stop = true; 
+
+            if(input.getVerbose() >= 1) printf ("i %3d | %12.4f | %12.4f | %12.4f | %12.4f \n", it, inf_norm, std::abs((curr_obj - prev_obj)),  best_ub, time(NULL)-start_time);
+        }
+        if(leader->getStatus() == Status::Time_Limit) break;
+
+        // Compute duality error.
+        double duality_error = computeDualityError();
+        if(input.getVerbose() >= 1) printf ("rho %12.4f | %12.4f | %12.4f | %12.4f \n", rho, duality_error, best_ub, time(NULL)-start_time);
+        if(duality_error <= tol_bi_feas) {
+            // Use status optimal meaining it converged within time limit and max nb iterations.
+            leader->setStatus(Status::Optimal);
+            break;
+        }
+
+        // Update penalty parameter.
+        rho *= rho_mult;
+    }
+    leader->setTime(time(NULL) - start_time);
+
+    // Updating best solution.
+    leader->setUB(best_ub);
+    leader->setX_(best_x_);
+
+    fs_ = best_fs_;
+    std::copy(best_yi_, best_yi_ + instance.getModel()->nb_follower_vars, yi_);
+
+    if(best_x_) delete[] best_x_;
+    if(best_yi_) delete[] best_yi_;
+
+    if(leader->getStatus() == Status::Optimal){
+        bool converged_sol_best = true;
+        if(best_ub <= leader->getGRBModel()->get(GRB_DoubleAttr_ObjVal) - 1e-6) 
+            converged_sol_best = false;
+        else converged_sol_best = true;
+    }
+
+    // Verify if stopped by number of iterations.
+    if(leader->getStatus() == Status::Not_Solved) leader->setStatus(Status::Iteration_Limit);
+
+    if(input.getVerbose() >= 1) leader->print();
+}
+
+void DepGeneralFollowerSolver::solve_sub_penalty(double rho){
+    // Solve second subproblem. (dual of alpha problems).
+    for(int s = 0; s < instance.getNbScenarios(); ++s){
+        int index_bd_min, index_bd_max;
+        double alpha_min_new, alpha_max_new;
+        if(s == 0){
+            alpha_min_new = instance.defineMinStep(index_bd_min, pr, s, leader->getX_(), yi_, fs_, Fs_, Fw_, input.getTypeDepGeneral(), input.getNbIntervalsGeneral(), input.getScalingGeneral(), true);
+            alpha_max_new = instance.defineMaxStep(index_bd_max, pr, s, leader->getX_(), yi_, fs_, Fs_, Fw_, input.getTypeDepGeneral(), input.getNbIntervalsGeneral(), input.getScalingGeneral(), true);
+        }else{
+            alpha_min_new = instance.defineMinStep(index_bd_min, pr, s, leader->getX_(), y_[s-1], fs_, Fs_, Fw_, input.getTypeDepGeneral(), input.getNbIntervalsGeneral(), input.getScalingGeneral(), true);
+            alpha_max_new = instance.defineMaxStep(index_bd_max, pr, s, leader->getX_(), y_[s-1], fs_, Fs_, Fw_, input.getTypeDepGeneral(), input.getNbIntervalsGeneral(), input.getScalingGeneral(), true);
+        }
+
+        // if(b_alpha_min_[s] != index_bd_min) {
+        //     std::cout << s << " Min: " << b_alpha_min_[s] << " " << index_bd_min << std::endl;
+        //     std::cout << s << " Alpha min: " << alpha_min_[s] << " " << alpha_min_new << std::endl; 
+        // }
+        // if(b_alpha_max_[s] != index_bd_max) {
+        //     std::cout << s << " Max: " << b_alpha_max_[s] << " " << index_bd_max << std::endl;
+        //     std::cout << s << " Alpha max: " << alpha_max_[s] << " " << alpha_max_new << std::endl; 
+        // }
+
+        b_alpha_min_[s] = index_bd_min;
+        b_alpha_max_[s] = index_bd_max;
+
+        // alpha_min_[s] = alpha_min_new;
+        // alpha_max_[s] = alpha_max_new;
+
+        for(int i = 0; i < getNbConstrsMin(s); ++i) 
+            bound_alpha_min[s][i].set(GRB_DoubleAttr_Obj, 0.0);
+        bound_alpha_min[s][index_bd_min].set(GRB_DoubleAttr_Obj, -rho);
+
+        for(int i = 0; i < getNbConstrsMax(s); ++i) 
+            bound_alpha_max[s][i].set(GRB_DoubleAttr_Obj, 0.0);
+        bound_alpha_max[s][index_bd_max].set(GRB_DoubleAttr_Obj, rho);   
+    }
+}
+
+void DepGeneralFollowerSolver::get_variables(double & inf_norm){
+    // Get variables and inf. norm for leader variables.
+    leader->get_variables(inf_norm);
+
+    // Copy previous follower solution for comparison.
+    double * prev_yi_ = new double[instance.getModel()->nb_follower_vars];
+    std::copy(yi_, yi_ + instance.getModel()->nb_follower_vars, prev_yi_);
+    
+    std::vector<double*> prev_y_(instance.getNbScenarios(),NULL);
+    for(int s = 0; s < instance.getNbScenarios(); ++s) {
+        prev_y_[s] = new double[instance.getModel()->nb_follower_vars];
+        std::copy(y_[s], y_[s] + instance.getModel()->nb_follower_vars, prev_y_[s]);
+    }
+
+    // Update current solution.
+    if(yi_) { delete[] yi_; yi_ = NULL; }
+    yi_ = leader->getGRBModel()->get(GRB_DoubleAttr_X,yi,instance.getModel()->nb_follower_vars);
+    
+    for(int s = 0; s < instance.getNbScenarios(); ++s){
+        if(y_[s]) delete[] y_[s];
+        y_[s] = leader->getGRBModel()->get(GRB_DoubleAttr_X,y[s],instance.getModel()->nb_follower_vars);
+    }
+
+    fs_ = fs.get(GRB_DoubleAttr_X);
+    if(input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral){
+        Fs_ = Fs.get(GRB_DoubleAttr_X);
+        Fw_ = Fw.get(GRB_DoubleAttr_X);
+    }  
+
+    // Compute infinity norm of the difference between current and previous solutions.
+    inf_norm = std::max(inf_norm, inf_norm_diff(prev_yi_, yi_, instance.getModel()->nb_follower_vars));
+    for(int s = 0; s < instance.getNbScenarios(); ++s)
+        inf_norm = std::max(inf_norm, inf_norm_diff(prev_y_[s], y_[s], instance.getModel()->nb_follower_vars));
+
+    // Delete previous solution
+    delete[] prev_yi_;
+    for(int s = 0; s < instance.getNbScenarios(); ++s) delete[] prev_y_[s];
+}
+
+double DepGeneralFollowerSolver::computeDualityError(){
+    if(alpha_min_) delete[] alpha_min_;
+    if(alpha_max_) delete[] alpha_max_;
+    alpha_min_ = leader->getGRBModel()->get(GRB_DoubleAttr_X,alpha_min,instance.getNbScenarios());
+    alpha_max_ = leader->getGRBModel()->get(GRB_DoubleAttr_X,alpha_max,instance.getNbScenarios());
+
+    for(int s = 0; s < instance.getNbScenarios(); ++s){
+        bound_alpha_min_[s] = bound_alpha_min[s][b_alpha_min_[s]].get(GRB_DoubleAttr_X);
+        bound_alpha_max_[s] = bound_alpha_max[s][b_alpha_max_[s]].get(GRB_DoubleAttr_X);
+    }
+
+    double strong_duality_error = 0.0;
+    for(int s = 0; s < instance.getNbScenarios(); ++s){
+        strong_duality_error = std::max(strong_duality_error, std::abs(alpha_min_[s] - bound_alpha_min_[s])/std::max(1e-12,std::abs(alpha_min_[s])));
+        strong_duality_error = std::max(strong_duality_error, std::abs(bound_alpha_max_[s] - alpha_max_[s])/std::max(1e-12,std::abs(alpha_max_[s])));
+    }
+    return strong_duality_error;
+}
+
+void DepGeneralFollowerSolver::evaluateSAA(double & best_ub_, double & best_fs_, double * best_x_, double * best_yi_){
+    double x_obj_leader = 0.0;
+    for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
+        x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*leader->getX_(i);
+
+    double y_obj_leader = 0.0;
+    instance.evaluateSAADepGeneral(y_obj_leader,pr,leader->getX_(),yi_,Fs_,Fw_,fs_,
+        input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+    
+    if((x_obj_leader + y_obj_leader) <= best_ub_){
+        best_ub_ = (x_obj_leader + y_obj_leader);
+
+        best_fs_ = fs_;
+        std::copy(leader->getX_(), leader->getX_() + instance.getModel()->nb_leader_vars, best_x_);
+        std::copy(yi_, yi_ + instance.getModel()->nb_follower_vars, best_yi_);
+    }
+}
+
+void DepGeneralFollowerSolver::solve_local_search(){
+    for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
+        BilevelVariable var = instance.getModel()->leader_vars[i];
+        max_delta = std::min(max_delta,(int)((var.ub - var.lb)/2));
+    }
+    num_pairs = 5*instance.getModel()->nb_leader_vars;
+
+    std::mt19937 rng(7919);
+    std::uniform_int_distribution<int> sign_dist(0,1);
+    std::uniform_int_distribution<int> var_dist(0,instance.getModel()->nb_leader_vars-1); 
+
+    /////////////////////////////////////////////////////////////////////
+
+    double start_time = time(NULL); 
+
+    // Auxiliars for best solution.
+    double best_ub_ = std::numeric_limits<double>::infinity();
+    double best_fs_ = std::numeric_limits<double>::infinity();;  
+    double * best_x_ = new double[instance.getModel()->nb_leader_vars];
+    double * best_yi_ = new double[instance.getModel()->nb_follower_vars];
+
+    // Auxiliar for current solution.
+    double * test_x_ = new double[instance.getModel()->nb_leader_vars];
+
+    // Initialize solution. 
+    // Solution for optimistic follower with interior solution defined.
+    leader->getGRBModel()->update(); 
+    leader->getGRBModel()->optimize();
+
+    Status sub_status = statusFromGurobi(leader->getGRBModel()->get(GRB_IntAttr_Status));
+    if(sub_status == Status::Optimal || sub_status == Status::Time_Limit) upd_solution();
+    else leader->verify_stat();
+    evaluateSAA(best_ub_, best_fs_, best_x_, best_yi_);
+
+    // Loop for local search.
+    int it = 0;
+    int delta = 1;
+    while(delta <= max_delta){
+        ++it;
+        double prev_ub = best_ub_;
+        
+        if(input.getVerbose() >= 1) 
+            printf ("delta: %3d | it: %3d | ub: %12.4f | time: %12.4f \n", delta, it, best_ub_, time(NULL)-start_time);
+
+        // Including and removing a delta constant at each leader variable.
+        std::copy(best_x_, best_x_ + instance.getModel()->nb_leader_vars, test_x_);
+        for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
+            BilevelVariable var = instance.getModel()->leader_vars[i];
+            
+            if((test_x_[i] + delta) <= var.ub){
+                test_x_[i] += delta;
+                if(verify_leader_feas(test_x_) == true){
+                    bool bilevel_feasible = upd_follower_sol(test_x_);
+                    if((bilevel_feasible == true) && (Fs_ <= best_ub_ - 1e-6)) {
+                        evaluateSAA(best_ub_,best_fs_,best_x_,best_yi_);
+                    }
+                }
+                test_x_[i] -= delta;
+                if((time(NULL) - start_time) >= input.getTimeLimit()) break;
+            }
+
+            if((test_x_[i] - delta) >= var.lb){
+                test_x_[i] -= delta;
+                if(verify_leader_feas(test_x_) == true){
+                    bool bilevel_feasible = upd_follower_sol(test_x_);
+                    if((bilevel_feasible == true) && (Fs_ <= best_ub_ - 1e-6)) {
+                        evaluateSAA(best_ub_,best_fs_,best_x_,best_yi_);
+                    }
+                }
+                test_x_[i] += delta;
+                if((time(NULL) - start_time) >= input.getTimeLimit()) break;
+            }
+        }
+
+        // Sampling pairs to try to improve decision.
+        for(int p = 0; p < num_pairs; ++p){
+            int sign_i = (sign_dist(rng) == 0) ? -1 : 1;
+            int sign_j = (sign_dist(rng) == 0) ? -1 : 1;
+
+            int i = var_dist(rng);
+            int j = var_dist(rng);
+            while(i == j) j = var_dist(rng);
+
+            const BilevelVariable & var_i = instance.getModel()->leader_vars[i];
+            const BilevelVariable & var_j = instance.getModel()->leader_vars[j];
+
+            if((test_x_[i] + sign_i*delta >= var_i.lb) && (test_x_[i] + sign_i*delta <= var_i.ub) &&
+                (test_x_[j] + sign_j*delta >= var_j.lb) && (test_x_[j] + sign_j*delta <= var_j.ub)){
+
+                test_x_[i] += sign_i * delta;
+                test_x_[j] += sign_j * delta;
+
+                if(verify_leader_feas(test_x_) == true){
+                    bool bilevel_feasible = upd_follower_sol(test_x_);
+                    if((bilevel_feasible == true) && (Fs_ <= best_ub_ - 1e-6)){
+                        evaluateSAA(best_ub_,best_fs_,best_x_,best_yi_);
+                    }
+                }
+                test_x_[i] -= sign_i * delta;
+                test_x_[j] -= sign_j * delta;
+            }
+        }
+
+        // Sampling pairs to try to improve decision.
+        // for(int p = 0; p < num_pairs; ++p){
+        //     int sign_i = (sign_dist(rng) == 0) ? -1 : 1;
+        //     int sign_j = (sign_dist(rng) == 0) ? -1 : 1;  
+        //     std::vector<int> feasible_i;
+        //     std::vector<int> feasible_j;
+        //     for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
+        //         const BilevelVariable & var_i = instance.getModel()->leader_vars[i];
+        //         if((test_x_[i] + sign_i*delta >= var_i.lb) && (test_x_[i] + sign_i*delta <= var_i.ub)) 
+        //             feasible_i.push_back(i);
+        //     }
+        //     for(int j = 0; j < instance.getModel()->nb_leader_vars; ++j){
+        //         const BilevelVariable & var_j = instance.getModel()->leader_vars[j];
+        //         if((test_x_[j] + sign_j*delta >= var_j.lb) && (test_x_[j] + sign_j*delta <= var_j.ub)) 
+        //             feasible_j.push_back(j);
+        //     }
+        //     if(feasible_i.empty() || feasible_j.empty()) continue;
+        //     std::uniform_int_distribution<int> i_dist(0, feasible_i.size() - 1);
+        //     std::uniform_int_distribution<int> j_dist(0, feasible_j.size() - 1);
+        //     int i = feasible_i[i_dist(rng)];
+        //     int j = feasible_j[j_dist(rng)];
+        //     if (i == j) continue;
+        //     test_x_[i] += sign_i * delta;
+        //     test_x_[j] += sign_j * delta;
+        //     if(verify_leader_feas(test_x_) == true){
+        //         bool bilevel_feasible = upd_follower_sol(test_x_);
+        //         if(bilevel_feasible){
+        //             evaluateSAA(best_ub_,best_fs_,best_x_,best_yi_);
+        //         }
+        //     }
+        //     test_x_[i] -= sign_i * delta;
+        //     test_x_[j] -= sign_j * delta;
+        // }
+
+        if(best_ub_ >= prev_ub - 1e-6){
+            delta += 1;
+            if(delta > max_delta) leader->setStatus(Status::Optimal);
+        }else{ 
+            delta = 1; 
+        }
+        if(it >= nb_max_it) {
+            leader->setStatus(Status::Iteration_Limit);
+        }
+        if((time(NULL) - start_time) >= input.getTimeLimit()){
+            leader->setStatus(Status::Time_Limit);
+        }
+        if(leader->getStatus() == Status::Iteration_Limit || leader->getStatus() == Status::Time_Limit) break;
+    }
+    leader->setTime(time(NULL) - start_time);
+    
+    // Updating best solution.
+    leader->setUB(best_ub_);
+    leader->setX_(best_x_);
+
+    fs_ = best_fs_;
+    std::copy(best_yi_, best_yi_ + instance.getModel()->nb_follower_vars, yi_);
+
+    if(best_x_) delete[] best_x_;
+    if(best_yi_) delete[] best_yi_;
+    if(test_x_) delete[] test_x_;
+
+    if(input.getVerbose() >= 1) leader->print();
+}
+
+bool DepGeneralFollowerSolver::verify_leader_feas(double * test_x_){
+    if(instance.getModel()->nb_leader_constrs > 0){
+        for(int c = 0; c < instance.getModel()->nb_leader_constrs; ++c){
+            BilevelConstraint constr = instance.getModel()->leader_constrs[c];
+            
+            double sum_x = 0.0;
+            for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
+                BilevelVariable var = instance.getModel()->leader_vars[i];
+                sum_x += constr.coeffs[var.id]*test_x_[i];
+            }
+
+            if(constr.sense == '=') { if(sum_x >= constr.rhs + 1e-6 || sum_x <= constr.rhs - 1e-6) return false; }
+            else if(constr.sense == '<'){ if(sum_x >= constr.rhs + 1e-6) return false; } 
+            else if(constr.sense == '>'){ if(sum_x <= constr.rhs - 1e-6) return false; }
+        }
+    }
+    return true;
+}
+
+bool DepGeneralFollowerSolver::upd_follower_sol(double * test_x_){
+    // Update leader decision with
+    leader->setX_(test_x_);
+
+    // Solve follower problem.
+    bool bilevel_feasible = solveFollowerProblem();
+
+    // Solve interior, optimistic and pessimistic solutions.
+    if(bilevel_feasible == true) {
+        AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,true,true);
+    }
+
+    return bilevel_feasible;
+}
+
+void DepGeneralFollowerSolver::defineFollowerProblem(){
+    model_follower = new GRBModel(*leader->getGRBEnv());
+
+    // if(input.getVerbose() <= 1) model_follower->set(GRB_IntParam_OutputFlag, 0);
+    // else model_follower->set(GRB_IntParam_OutputFlag, 1);
+    model_follower->set(GRB_IntParam_OutputFlag, 0);
+    model_follower->set(GRB_IntParam_Threads, input.getNbThreads());
+
+    // Follower variables.
+    y_follower = model_follower->addVars(instance.getModel()->nb_follower_vars,GRB_CONTINUOUS);
+    for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+        BilevelVariable var = instance.getModel()->follower_vars[i];
+        
+        if(var.lb <= -instance.getModel()->inf) 
+            y_follower[i].set(GRB_DoubleAttr_LB,-GRB_INFINITY);
+        else y_follower[i].set(GRB_DoubleAttr_LB,var.lb);
+        if(var.ub >=  instance.getModel()->inf) 
+            y_follower[i].set(GRB_DoubleAttr_UB,GRB_INFINITY);
+        else y_follower[i].set(GRB_DoubleAttr_UB,var.ub);
+
+        y_follower[i].set(GRB_StringAttr_VarName,var.name);
+        y_follower[i].set(GRB_CharAttr_VType,var.type);
+
+        // Define follower objective.
+        y_follower[i].set(GRB_DoubleAttr_Obj,var.obj_follower);
+    }
+
+    // Follower constraints.
+    for(int c = 0; c < instance.getModel()->nb_follower_constrs; ++c){
+        BilevelConstraint constr = instance.getModel()->follower_constrs[c];
+
+        GRBLinExpr expr = 0;
+        for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
+            BilevelVariable var = instance.getModel()->follower_vars[i];
+            expr += constr.coeffs[var.id]*y_follower[i];
+        }
+
+        if(constr.sense == '=') 
+            follower_constrs.push_back(model_follower->addConstr(expr == constr.rhs, constr.name));
+        else if(constr.sense == '<'){
+            follower_constrs.push_back(model_follower->addConstr(expr <= constr.rhs, constr.name));
+        }else if(constr.sense == '>'){
+            follower_constrs.push_back(model_follower->addConstr(expr >= constr.rhs, constr.name));
+        }
+    }
+}
+
+bool DepGeneralFollowerSolver::solveFollowerProblem(){
+    // Update follower constraints according to current x_.
+    for(int c = 0; c < instance.getModel()->nb_follower_constrs; ++c){
+        const BilevelConstraint & constr = instance.getModel()->follower_constrs[c];
+
+        double sum_x = 0.0;
+        for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
+            BilevelVariable var = instance.getModel()->leader_vars[i];
+            sum_x += constr.coeffs.at(var.id)*leader->getX_(i); 
+        }
+        follower_constrs[c].set(GRB_DoubleAttr_RHS, (constr.rhs - sum_x));
+    }
+
+    // Solve optimal follower and get solution.
+    model_follower->update();
+    model_follower->optimize();
+
+    Status status_follower = statusFromGurobi(model_follower->get(GRB_IntAttr_Status));
+    if(status_follower == Status::Optimal){   
+        if(ys_) { delete[] ys_; ys_ = NULL; }
+        ys_ = model_follower->get(GRB_DoubleAttr_X,y_follower,instance.getModel()->nb_follower_vars);
+        fs_ = model_follower->get(GRB_DoubleAttr_ObjVal);
+        return true;
+    }
+    else{ return false; } 
+}
+
+void DepGeneralFollowerSolver::defineCallback(){
+    leader->defineBinaryVariables();
+
+    theta = leader->getGRBModel()->addVar(leader->getGeneralLB(),GRB_INFINITY,1.0,GRB_CONTINUOUS);
+    leader->getGRBModel()->addConstr(theta >= Fs);
+    leader->getGRBModel()->addConstr(theta >= leader->getGeneralLB());
+
+    leader->getGRBModel()->set(GRB_IntParam_LazyConstraints, 1);
+}
+
+void DepGeneralFollowerSolver::solve_callback(){
+    double start_time = time(NULL);
+    
+    leader->getGRBModel()->setCallback(this);
+    leader->getGRBModel()->update();
+    leader->getGRBModel()->optimize();
+
+    leader->setStatus(statusFromGurobi(leader->getGRBModel()->get(GRB_IntAttr_Status)));
+    if(leader->getStatus() == Status::Optimal || leader->getStatus() == Status::Time_Limit) upd_solution();
+    else leader->verify_stat(); 
+    if(leader->getNbSol() > 0) {
+        yi_ = new double[instance.getModel()->nb_follower_vars];
+        AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,false,true); // yi_
+    }
+
+    leader->setTime(time(NULL) - start_time);
+    if(input.getVerbose() >= 1) leader->print();
+}
+
 void DepGeneralFollowerSolver::callback(){
     try{
-        if(where == GRB_CB_MIPSOL){
-            std::cout << "Running callback\n";
-            // Verifying any violated constraints.
-            if(alpha_min_) delete[] alpha_min_;
-            if(alpha_max_) delete[] alpha_max_;
-            alpha_min_ = getSolution(alpha_min,instance.getNbScenarios());
-            alpha_max_ = getSolution(alpha_min,instance.getNbScenarios());
-
-            std::cout << "Solution found\n";
-            
-            for(int s = 0; s < instance.getNbScenarios(); ++s){
-                if(bound_alpha_min_[s]) delete[] bound_alpha_min_[s];
-                if(bound_alpha_max_[s]) delete[] bound_alpha_max_[s];
-
-                int nb_constrs_min = getNbConstrsMin(s);
-                int nb_constrs_max = getNbConstrsMax(s);
-
-                bound_alpha_min_[s] = getSolution(bound_alpha_min[s], nb_constrs_min);
-                bound_alpha_max_[s] = getSolution(bound_alpha_max[s], nb_constrs_max);
-
-                auto min_ = std::max_element(bound_alpha_min_[s], bound_alpha_min_[s] + nb_constrs_min);
-                auto max_ = std::min_element(bound_alpha_max_[s], bound_alpha_max_[s] + nb_constrs_max);
-
-                int min_it = std::distance(bound_alpha_min_[s], min_);
-                int max_it = std::distance(bound_alpha_max_[s], max_);
-
-                double min_val = *min_;
-                double max_val = *max_;
-
-                std::cout << alpha_min_[s] << " " << min_val << " " << bound_alpha_min_[s][min_it] << std::endl;
-                std::cout << alpha_max_[s] << " " << max_val << " " << bound_alpha_max_[s][max_it] << std::endl;
-
-                bool included = false;
-                if(alpha_min_[s] >= min_val + 1e-12){
-                    included = true;
-                    GRBLinExpr expr = 0;
-                    getExpression(expr, s, 0, min_it);
-                    addLazy(expr >= 0);
-                }
-                if(alpha_max_[s] <= max_val - 1e-12){
-                    included = true;
-                    GRBLinExpr expr = 0;
-                    getExpression(expr, s, 1, max_it);
-                    addLazy(expr >= 0);
-                }
-                if(included == true) break;
-            }
-
-            if(x_) delete[] x_; 
-            if(yi_) delete[] yi_;
-            
-            x_ = getSolution(leader->getX(),instance.getModel()->nb_leader_vars);
-            yi_ = getSolution(yi,instance.getModel()->nb_follower_vars);
+        if (where == GRB_CB_MIPSOL){ 
+            // Getting current integer solution.
+            double * x_ = getSolution(leader->getX(), instance.getModel()->nb_leader_vars);
+            double * bx_ = getSolution(leader->getXBinary(), leader->getTotalNbXBinary());
+            double theta_ = getSolution(theta);
+            leader->setX_(x_);
             fs_ = getSolution(fs);
-            if(input.getTypeDepGeneral() != Input::TypesDepGeneral::Neutral){
-                Fs_ = getSolution(Fs);
-                Fw_ = getSolution(Fw);
-            }
+            if(ys_) { delete[] ys_; ys_ = NULL; }
+            ys_ = getSolution(ys, instance.getModel()->nb_follower_vars);
+            AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,true,true); // Fs_, Fw_, yi_ (Fs_ not guaranteed optimal in the current solution, should compute it here)
 
+            // Compute correct expected value.
             double x_obj_leader = 0.0;
             for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
                 x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*x_[i];
 
-            std::fill(alpha_, alpha_ + instance.getNbScenarios(), -1.0);
-            std::fill(alpha_min_, alpha_min_ + instance.getNbScenarios(), -1.0);
-            std::fill(alpha_max_, alpha_max_ + instance.getNbScenarios(), -1.0);
-            for(int s = 0; s < instance.getNbScenarios(); ++s){
-                std::fill(y_[s], y_[s] + instance.getModel()->nb_follower_vars, -1.0);
+            double y_obj_leader = 0.0;
+            instance.evaluateSAADepGeneral(y_obj_leader,pr,x_,yi_,Fs_,Fw_,fs_,
+                input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+            
+            // Include cut to obtain correct expected value for current leader solution.
+            if(y_obj_leader >= theta_ + 1e-6){
+                int size = 0;
+                GRBLinExpr expr = 0;
+                for(int j = 0; j < leader->getTotalNbXBinary(); ++j){
+                    if(bx_[j] >= 0.999) { expr += (y_obj_leader - leader->getGeneralLB())*leader->getXBinary(j); ++size; }
+                    else if(bx_[j] <= 0.001) { expr -= (y_obj_leader - leader->getGeneralLB())*leader->getXBinary(j); }
+                }
+                expr -= (y_obj_leader - leader->getGeneralLB())*size;
+                expr += y_obj_leader;
+                addLazy(theta >= expr);
             }
 
-            double y_obj_leader = 0.0;
-            instance.evaluateSAADepGeneral(y_obj_leader,alpha_,alpha_min_,b_alpha_min_,alpha_max_,b_alpha_max_,y_,
-                                          pr,x_,yi_,Fs_,Fw_,fs_,
-                                          input.getTypeDepGeneral(),
-                                          input.getNbIntervalsGeneral(),
-                                          input.getScalingGeneral());
+            // New best solution found, pass it to the solver.
+            if((x_obj_leader + y_obj_leader) <= getDoubleInfo(GRB_CB_MIPSOL_OBJBST) - 1e-6){
+                setSolution(leader->getX(),x_,instance.getModel()->nb_leader_vars);
+                setSolution(leader->getXBinary(),bx_,leader->getTotalNbXBinary());
+                setSolution(theta,y_obj_leader);
+                setSolution(Fs,Fs_);
+                setSolution(fs,fs_);
+                setSolution(ys,ys_,instance.getModel()->nb_follower_vars);
+                if(input.isFollowerNearOpt() == true){
+                    setSolution(ys_eps,ys_eps_,instance.getModel()->nb_follower_vars);
+                    setSolution(fs_eps,fs_eps_);
+                }
+            }
 
-            std::cout << (x_obj_leader + y_obj_leader) <<" " << getDoubleInfo(GRB_CB_MIPSOL_OBJBST) << std::endl;
-            if((x_obj_leader + y_obj_leader) <= getDoubleInfo(GRB_CB_MIPSOL_OBJBST)){
-                std::cout << "Solution found: " << (x_obj_leader + y_obj_leader)  << std::endl;
+            // Free memory.
+            if(x_) delete[] x_;
+            if(bx_) delete[] bx_;
+        }
+        if (where == GRB_CB_MIPNODE && cuts_mipnode == true){
+            if(getIntInfo(GRB_CB_MIPNODE_STATUS) == GRB_OPTIMAL){
+                // Get current x_ and bx_.
+                double * x_ = getNodeRel(leader->getX(), instance.getModel()->nb_leader_vars);
+                double * bx_ = getNodeRel(leader->getXBinary(),leader->getTotalNbXBinary());
                 
-                setSolution(leader->getX(), x_, instance.getModel()->nb_leader_vars);
-                setSolution(yi, yi_, instance.getModel()->nb_follower_vars);
-                setSolution(alpha, alpha_, instance.getNbScenarios());
-                setSolution(alpha_min, alpha_min_, instance.getNbScenarios());
-                setSolution(alpha_max, alpha_max_, instance.getNbScenarios());
-                for(int s = 0; s < instance.getNbScenarios(); ++s){
-                    setSolution(y[s], y_[s], instance.getModel()->nb_follower_vars);
-                    for(int j = 0; j < getNbConstrsMin(s); ++j){
-                        if(j == b_alpha_min_[s]) setSolution(b_alpha_min[s][j],1.0);
-                        else setSolution(b_alpha_min[s][j],0.0);
+                // Verify if leader solution is integer.
+                bool all_integer = true;
+                for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i) {
+                    if(std::abs(x_[i] - std::round(x_[i])) >= 1e-6) {
+                        all_integer = false;
+                        break;
                     }
-                    for(int j = 0; j < getNbConstrsMax(s); ++j){
-                        if(j == b_alpha_max_[s]) setSolution(b_alpha_max[s][j],1.0);
-                        else setSolution(b_alpha_max[s][j],0.0);
+                }
+                if(all_integer == true){
+                    for(int i = 0; i < leader->getTotalNbXBinary(); ++i){
+                        if(std::abs(bx_[i] - std::round(bx_[i])) >= 1e-6) {
+                            all_integer = false;
+                            break;
+                        }
                     }
                 }
 
-                for(int s = 0; s < instance.getNbScenarios(); ++s){
-                    std::cout << "scenario " << s << std::endl;
-                    std::cout << "alpha_min: " << alpha_min_[s] << std::endl;
-                    std::cout << "alpha_max: " << alpha_max_[s] << std::endl;
-                    std::cout << "alpha: " << alpha_[s] << "||" << std::endl;
-                    std::cout << "\n";
-                    for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                        if(s > 0){
-                            std::cout << y_[s][i] << " " << (y_[s-1][i] + instance.getGeneralDirection(pr,s,i)*alpha_[s]) << std::endl; 
+                if(all_integer == true){
+                    double theta_ = getNodeRel(theta);
+                    leader->setX_(x_);
+                    bool optimal = solveFollowerProblem(); // fs_ (not well defined at mipnode)
+                    if(optimal == true){
+                        AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,true,true); // Fs_, Fw_, yi_ 
+
+                        // Compute correct expected value.
+                        double x_obj_leader = 0.0;
+                        for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i)
+                            x_obj_leader += instance.getModel()->leader_vars[i].obj_leader*x_[i];
+
+                        double y_obj_leader = 0.0;
+                        instance.evaluateSAADepGeneral(y_obj_leader,pr,x_,yi_,Fs_,Fw_,fs_,
+                            input.getTypeDepGeneral(),input.getNbIntervalsGeneral(),input.getScalingGeneral());
+                        
+                        // Include cut to obtain correct expected value for current leader solution.
+                        if(y_obj_leader >= theta_ + 1e-6){
+                            int size = 0;
+                            GRBLinExpr expr = 0;
+                            for(int j = 0; j < leader->getTotalNbXBinary(); ++j){
+                                if(bx_[j] >= 0.999) { expr += (y_obj_leader - leader->getGeneralLB())*leader->getXBinary(j); ++size; }
+                                else if(bx_[j] <= 0.001) { expr -= (y_obj_leader - leader->getGeneralLB())*leader->getXBinary(j); }
+                            }
+                            expr -= (y_obj_leader - leader->getGeneralLB())*size;
+                            expr += y_obj_leader;
+                            addLazy(theta >= expr);
+                        }
+
+                        if((x_obj_leader + y_obj_leader) <= getDoubleInfo(GRB_CB_MIPNODE_OBJBST) - 1e-6){
+                            setSolution(leader->getX(),x_,instance.getModel()->nb_leader_vars);
+                            setSolution(leader->getXBinary(),bx_,leader->getTotalNbXBinary());
+                            setSolution(theta,y_obj_leader);
+                            setSolution(Fs,Fs_);
+                            setSolution(fs,fs_);
+                            setSolution(ys,ys_,instance.getModel()->nb_follower_vars);
+                            if(input.isFollowerNearOpt() == true){
+                                setSolution(ys_eps,ys_eps_,instance.getModel()->nb_follower_vars);
+                                setSolution(fs_eps,fs_eps_);
+                            }
+                            // setSolution(Fw,Fw_);
+                            // setSolution(yw,yw_,instance.getModel()->nb_follower_vars);
                         }
                     }
                 }
                 
-                // useSolution();
+                // Free memory.
+                delete[] x_;
+                delete[] bx_;
             }
-            std::cout << "---------"<< std::endl;
         }
     }
     catch (GRBException e){
         std::cout << "Error number: " << e.getErrorCode() << std::endl;
         std::cout << e.getMessage() << std::endl;
     }
+    catch (const std::runtime_error& e) {
+        std::cerr << "Runtime error: " << e.what() << std::endl;
+    }
+    catch (const std::exception& e) {
+        std::cerr << "Standard exception: " << e.what() << std::endl;
+    }
     catch (...){
         std::cout << "Error during callback" << std::endl;
-    }
-}
-
-void DepGeneralFollowerSolver::getExpression(GRBLinExpr & expr, int s, int min_or_max, int it){
-    expr = 0;
-    if(it < instance.getGeneralNbConstrsAlpha(pr, s, min_or_max)){
-        int c = instance.getGeneralConstrsAlpha(pr, s, min_or_max, it);
-    
-        if(c != instance.getModel()->nb_follower_constrs){
-            BilevelConstraint constr = instance.getModel()->follower_constrs[c];
-
-            expr = 0;
-            for(int i = 0; i < instance.getModel()->nb_leader_vars; ++i){
-                BilevelVariable var = instance.getModel()->leader_vars[i];
-                expr += constr.coeffs[var.id]*leader->getX(i);     
-            }
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                BilevelVariable var = instance.getModel()->follower_vars[i];  
-                if(s == 0) expr += constr.coeffs[var.id]*yi[i];    
-                else expr += constr.coeffs[var.id]*y[s-1][i];
-            }
-            if(min_or_max == 0) expr += instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_min[s]/numeric);
-            else if(min_or_max == 1) expr += instance.getGeneralCoeffAlpha(pr,s,c)*(alpha_max[s]/numeric);
-
-            if(min_or_max == 0){
-                if(constr.sense == '<') {
-                    expr -= (constr.rhs - (constr.rhs - constr.bound)*(1.0 - b_alpha_min[s][it])); 
-                }
-                else if(constr.sense == '>') expr = (constr.rhs + (constr.bound - constr.rhs)*(1.0 - b_alpha_min[s][it]) - expr);
-            }
-            else if(min_or_max == 1){
-                if(constr.sense == '<') expr -= (constr.rhs - (constr.rhs - constr.bound)*(1.0 - b_alpha_max[s][it]));
-                else if(constr.sense == '>') expr = (constr.rhs + (constr.bound - constr.rhs)*(1.0 - b_alpha_max[s][it]) - expr);
-            }
-        }else{
-            expr = 0;
-            for(int i = 0; i < instance.getModel()->nb_follower_vars; ++i){
-                BilevelVariable var = instance.getModel()->follower_vars[i];
-                if(s == 0) expr += var.obj_follower*yi[i];    
-                else expr += var.obj_follower*y[s-1][i];
-            }
-            if(min_or_max == 0) expr += instance.getGeneralCoeffAlphaObjFollower(pr,s)*(alpha_min[s]/numeric);
-            else if(min_or_max == 1) expr += instance.getGeneralCoeffAlphaObjFollower(pr,s)*(alpha_max[s]/numeric);
-
-            if(input.isNearOptMult() == true){
-                if(min_or_max == 0) expr -= ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - instance.getModel()->follower_ub*(1.0 - b_alpha_min[s][it]));
-                else if(min_or_max == 1) expr -= ((1.0 - input.getEpsNearOpt())*fs + input.getEpsNearOpt()*instance.getModel()->follower_ub - instance.getModel()->follower_ub*(1.0 - b_alpha_max[s][it]));
-            }else{
-                if(min_or_max == 0) expr -= (fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - (instance.getModel()->follower_ub + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))*(1.0 - b_alpha_min[s][it]));
-                else if(min_or_max == 1) expr -= (fs + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb) - (instance.getModel()->follower_ub + input.getEpsNearOpt()*(instance.getModel()->follower_ub - instance.getModel()->follower_lb))*(1.0 - b_alpha_max[s][it]));
-            }
-        }
-    }
-    else if(it < (instance.getGeneralNbConstrsAlpha(pr, s, min_or_max) + instance.getGeneralNbBdlbsAlpha(pr, s, min_or_max))){
-        int i = instance.getGeneralBdlbsAlpha(pr, s, min_or_max, it - instance.getGeneralNbConstrsAlpha(pr, s, min_or_max));
-        double dir = instance.getGeneralDirection(pr,s,i);
-        BilevelVariable var = instance.getModel()->follower_vars[i];
-
-        expr = 0;
-        if(s == 0){
-            if(min_or_max == 0) expr = (var.lb + (var.ub - var.lb)*(1.0 - b_alpha_min[s][it])) - (yi[i] + dir*(alpha_min[s]/numeric));
-            else if(min_or_max == 1) expr = (var.lb + (var.ub - var.lb)*(1.0 - b_alpha_max[s][it])) - (yi[i] + dir*(alpha_max[s]/numeric));
-        }else{
-            if(min_or_max == 0) expr = (var.lb + (var.ub - var.lb)*(1.0 - b_alpha_min[s][it])) - (y[s-1][i] + dir*(alpha_min[s]/numeric));
-            else if(min_or_max == 1) expr = (var.lb + (var.ub - var.lb)*(1.0 - b_alpha_max[s][it])) - (y[s-1][i] + dir*(alpha_max[s]/numeric));
-        }
-    }
-    else if(it < (instance.getGeneralNbConstrsAlpha(pr, s, min_or_max) + instance.getGeneralNbBdlbsAlpha(pr, s, min_or_max) + instance.getGeneralNbBdubsAlpha(pr, s, min_or_max))){
-        int i = instance.getGeneralBdlbsAlpha(pr, s, min_or_max, it - instance.getGeneralNbConstrsAlpha(pr, s, min_or_max) - instance.getGeneralNbBdlbsAlpha(pr, s, min_or_max));
-        double dir = instance.getGeneralDirection(pr,s,i);
-        BilevelVariable var = instance.getModel()->follower_vars[i];
-
-        expr = 0;
-        if(s == 0){
-            if(min_or_max == 0) expr = (yi[i] + dir*(alpha_min[s]/numeric)) - (var.ub - (var.ub - var.lb)*(1.0 - b_alpha_min[s][it]));
-            else if(min_or_max == 1) expr = (yi[i] + dir*(alpha_max[s]/numeric)) - (var.ub - (var.ub - var.lb)*(1.0 - b_alpha_max[s][it]));
-        }else{
-            if(min_or_max == 0) expr = (y[s-1][i] + dir*(alpha_min[s]/numeric)) - (var.ub - (var.ub - var.lb)*(1.0 - b_alpha_min[s][it]));
-            else if(min_or_max == 1) expr = (y[s-1][i] + dir*(alpha_max[s]/numeric)) - (var.ub - (var.ub - var.lb)*(1.0 - b_alpha_max[s][it]));
-        }
     }
 }

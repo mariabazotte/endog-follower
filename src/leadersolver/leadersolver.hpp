@@ -26,6 +26,10 @@ class AbstractLeaderSolver {
         int nb_sol;
         Status status;
 
+        double general_lb;
+        double general_ub;
+        double time_prep;
+
         void writeCompFixStrongWeak(std::string &, double, double, double, double) const;
         void writeCompDepStrongWeak(std::string &, Input::TypesDepStrongWeak, double, double, double, double) const;
         void writeCompDepGeneral(std::string &, Input::TypesDepGeneral, int, double, double, double, double, double, double, double, double) const;
@@ -39,6 +43,10 @@ class AbstractLeaderSolver {
             nb_bnb = 0.0;
             nb_sol = 0;
             status = Status::Not_Solved;
+
+            general_lb = instance.getModel()->leader_lb;
+            general_ub = instance.getModel()->leader_ub;
+            time_prep = 0.0;
         } 
 
         virtual ~AbstractLeaderSolver() {}
@@ -49,7 +57,17 @@ class AbstractLeaderSolver {
         double getTime() const { return time_; }
         double getNbBnB() const { return nb_bnb; }
         double getNbSol() const { return nb_sol; }
-        Status getStatus() const { return status; }  
+        Status getStatus() const { return status; } 
+
+        void setLB(double i) { lb = i; gap = std::max((ub - lb)/std::abs(ub), 1.0); }
+        void setUB(double i) { ub = i; gap = std::max((ub - lb)/std::abs(ub), 1.0); }
+        void setTime(double i) { time_ = i + time_prep; }
+        void setStatus(Status i) { status = i; }
+        
+        double getGeneralLB() const { return general_lb; }
+        double getGeneralUB() const { return general_ub; }
+        void setGeneralLB(double i) { general_lb = i; }
+        void setGeneralUB(double i) { general_ub = i; }
 
         // Method to solve problem.
         virtual void solve() = 0;
@@ -79,14 +97,16 @@ class LeaderSolver : public AbstractLeaderSolver {
         void params();
         void write_inf();
         void write_sol();
-        void print();
-        void verify_stat();
-        void upd_solution();
         void create();
+        void get_variables();
+
+        GRBVar *x_binary = NULL;
+        int total_nb_x_binary;
+        std::vector<int> nb_x_binary;
 
     public:
         LeaderSolver(const Input &, Instance &, std::string);
-        LeaderSolver(const Input &, Instance &, std::string, int, GRBEnv *);
+        LeaderSolver(const Input &, Instance &, std::string, int, GRBEnv *, double, double, double);
 
         ~LeaderSolver();
 
@@ -101,9 +121,22 @@ class LeaderSolver : public AbstractLeaderSolver {
         const double * getX_() const { return x_; }
         AbstractFollowerSolver * getFollower() const { return follower; }
 
-        void solve();  
+        void setX_(double * new_x_) { std::copy(new_x_, new_x_ + instance.getModel()->nb_leader_vars, x_); }
+
+        void print();
+        void verify_stat();
+        void upd_solution();
+        void get_variables(double &);
+        void solve(); 
+
         std::string write() const;
         std::string writeHead() const; 
+
+        void defineBinaryVariables();
+        GRBVar * getXBinary() { return x_binary; }
+        GRBVar & getXBinary(int i) { return x_binary[i]; }
+        int getTotalNbXBinary() const { return total_nb_x_binary; }
+        int getNbXBinary(int i) const { return nb_x_binary[i]; }
 };
 
 class SAALeaderSolver : public AbstractLeaderSolver {
@@ -145,10 +178,14 @@ class SAALeaderSolver : public AbstractLeaderSolver {
         const double * getX_() const { return solvers[best_problem]->getX_(); }
         AbstractFollowerSolver * getFollower() const { return solvers[best_problem]->getFollower(); }
 
+        void defineLeaderBounds();
+
         void solve();
         std::string write() const;
         std::string writeHead() const; 
 };
+
+double inf_norm_diff(const double* a, const double* b, int n);
 
 #endif
 

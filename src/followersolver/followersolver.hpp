@@ -40,10 +40,10 @@ class AbstractFollowerSolver {
         double *ys_ = NULL;
         double *yw_ = NULL;
         double *yi_ = NULL;
-        double *ys_eps_ = NULL;
+        double *ys_eps_ = NULL;  
 
-        double eval_avg;                 // Parameters for optimal leader objective (part corresponding to follower variables) at evaluation problem.
-        std::vector<double> eval_sce;    
+        bool opt_defined;
+        bool pes_defined;
 
         // Define primal feasibility.
         void definePrimalVars(GRBVar *&, std::string);
@@ -60,7 +60,7 @@ class AbstractFollowerSolver {
         // Define follower and leader objectives.
         bool fs_not_init;
         void defineFollowerOptimalObj(GRBVar *&, std::string);
-        void defineFollowerNearOptimalObj(GRBVar &, GRBVar *&, GRBVar &, std::string);
+        void defineFollowerNearOptimalObj(GRBVar &, GRBVar *&, GRBVar &, std::string, bool);
         void defineLeaderObj(GRBVar &, GRBVar *&, std::string);
 
         // Define optimal follower.
@@ -82,9 +82,14 @@ class AbstractFollowerSolver {
         
     public:
         AbstractFollowerSolver(const Input & input, Instance & instance, LeaderSolver *leader) :
-                                input(input), instance(instance), leader(leader), fs_not_init(true) {}
+                                input(input), instance(instance), leader(leader), opt_defined(false), pes_defined(false), fs_not_init(true) {}
 
         virtual ~AbstractFollowerSolver() { 
+            if(ys) delete[] ys;
+            if(yw) delete[] yw;
+            if(yi) delete[] yi;
+            if(ys_eps) delete[] ys_eps;
+
             if(ys_) delete[] ys_;
             if(yw_) delete[] yw_;
             if(yi_) delete[] yi_;
@@ -116,12 +121,11 @@ class AbstractFollowerSolver {
         double getYi_(int i) const { return yi_[i]; }                         
         const double * getYi_() const { return yi_; }
         
-        // Getter for difference between scenario value and average value of the leader objective corresponding
-        // to follower variables for the evaluation problem. Used to compute variance of the estimator.
-        double getDiffEvalScenario(int s) const { return (eval_sce[s] - eval_avg); }
-        
         // Function to update the optimal solution after solving problem.
         virtual void upd_solution();
+
+        // Function to solve the problem.
+        virtual void solve();
         
         // Function to evaluate the optimal leader solution obtained after solving
         // the problem. It either computes the true expected value (enumerates all scenarios)

@@ -1,5 +1,7 @@
 CXX	:= c++
 CXXFLAGS := -Wall -Wextra -MMD -O2 -m64 -g -std=c++17
+# 
+# -O0 -g -fsanitize=address -fno-omit-frame-pointer
 INCLUDES := /home/gurobi/12.0.0/linux64/include/ ../auxiliar/eigen-5.0.0 
 LIBSINCLUDES := /home/gurobi/12.0.0/linux64/lib/ 
 LIBS = gurobi_c++ gurobi120 m
@@ -15,6 +17,11 @@ PYTHON_LIBS := -lpython3.12 -lpthread -ldl -lutil -lm
 
 CPPFLAGS += -I$(PYBIND11_INCLUDE) -I$(PYTHON_INCLUDE)
 LDFLAGS += -L$(PYTHON_LIB_DIR) $(PYTHON_LIBS)
+
+JL_SHARE = $(shell julia -e 'print(joinpath(Sys.BINDIR, Base.DATAROOTDIR, "julia"))')
+CPPFLAGS += $(shell $(JL_SHARE)/julia-config.jl --cflags)
+LDFLAGS  += $(shell $(JL_SHARE)/julia-config.jl --ldflags)
+LDFLAGS  += $(shell $(JL_SHARE)/julia-config.jl --ldlibs)
 
 OBJECTS := main.o \
 		input/input.o \

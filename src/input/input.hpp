@@ -39,9 +39,18 @@ class Input {
             DEP = 1                 /* Deterministic equivalent program. */
         };
 
+        enum MethodDepGeneral {     /* Approaches for solving the general decision-dependent SAA program case. */
+            SingleLevel = 0,        /* Single level formulation. */
+            Relax = 1,              /* Relaxation method. (Relaxing optimality for step variables).*/
+            Penalty = 2,            /* Penalty method. (Penalty Alternating Direction Method for step variables).*/
+            LocalSearch = 3,        /* Local search method. */
+            Callback = 4            /* Callback. */
+        };
+
     private:
         
         std::string instance_file;                 /* File with instance dataset. */
+        double instance_align;
 
         bool is_follower_near_optimal;             /* 0 -> Optimal follower S(x). 1 -> Near-optimal follower S(x,epsilon). */
         double eps_near_optimal;                   /* Epsilon parameter defining near-optimal follower. */
@@ -66,6 +75,8 @@ class Input {
         double strong_power_param;                 /* Parameter > 1 defining decay rate if Decision-dependent strong-weak Strong Power type.  */
         double fragile_power_param;                /* Parameter > 1 defining growth/decay rate if Decision-dependent strong-weak Fragile Power type.  */
         int strwk_nb_pwl_intervals;                /* Number of intervals used at the PWL for the Decidion-dependent strong weak case. */
+        double rel_error_pwl;                      /* Relative error used to compute the PWL points by auxiliar PiecewiseLinApprox.jl library. */
+        double abs_error_pwl;
 
         // Parameters for decision-dependent general case.
         int gen_nb_intervals;                      /* Number of intervals to define cooperation cooeficient for Decision-Dependent General Proportional and Strong Fragile cases. */
@@ -73,14 +84,15 @@ class Input {
         std::vector<double> gen_coeff_intervals;   /* Cooperation coefficient value for each interval. */
         double gen_max_coeff_intervals;            /* Maximum cooperation coefficient value between intervals. */
         double gen_scaling_param;                  /* Parameter > 0 for fragile and = 1 for proportional defining scaling for cooperation cooeficient if Decision-dependent general Proportional and Strong Fragile cases. */
-        bool gen_step_explicit;                    /* 0 -> Do not use explicit formulation for step variables. 1-> Use explicit formulation for step variables. */
+        bool gen_step_explicit;                    /* 0-> Do not use explicit formulation for step variables (Use KKT formulation). 1-> Use explicit formulation for step variables. */
+        bool gen_step_explicit_grbminmax;          /* 0-> Do not use gurobi min/max constraints for step explicit problem. 1-> Use gurobi min/max constraints for step explicit problem.*/
         
         // Solution approaches.
         int int_solver_approach;
         SolverApproach solver_approach;            /* Approach to solve the stochastic program with decision dependent uncertainty. */
 
-        bool relaxation;
-        bool lazy_callback;
+        int int_method_dep_gen;
+        MethodDepGeneral method_dep_gen;            /* Method for General decision-dependent. */
 
         // Solution files.
         std::string solution_file;                 /* File to write results. */
@@ -114,12 +126,14 @@ class Input {
         void defineGeneralIntervals();             /* Auxiliar function to define intervals for general case. */
         
     public:
+        Input(const Input &,double);
         Input() { defaultParams(); }
         Input(int argc, char* argv[]);
         ~Input(){ solFile.close(); compFile.close(); }
 
         // Instance
         std::string getInstanceFile() const { return instance_file; }
+        void setInstAlign(double v) { instance_align = v; }
 
         // Problem definition
         Input::FollowerBehavior getFollowerBehavior() const { return follower_behavior; }
@@ -134,6 +148,8 @@ class Input {
         double getParamStrongPower() const { return strong_power_param; }
         double getParamFragilePower() const { return fragile_power_param; }
         int getNbPWLIntervalsStrongWeak() const { return strwk_nb_pwl_intervals; }
+        double relErrorPWLStrongWeak() const { return rel_error_pwl; }
+        double absErrorPWLStrongWeak() const { return abs_error_pwl; }
         
         int getNbIntervalsGeneral() const { return gen_nb_intervals; }
         double getIntValueGeneral(int i) const { return gen_intervals[i]; }
@@ -144,6 +160,7 @@ class Input {
         double getMaxIntCoeffGeneral() const { return gen_scaling_param*gen_max_coeff_intervals; }
         double getScalingGeneral() const { return gen_scaling_param; }
         bool useStepExplicitGeneral() const { return gen_step_explicit; }
+        bool useStepExplicitGRBMinMax() const { return gen_step_explicit_grbminmax; }
 
         bool isFollowerNearOpt() const { return is_follower_near_optimal; }  
         double getEpsNearOpt() const { return eps_near_optimal; }  
@@ -152,11 +169,13 @@ class Input {
         // Problem resolution
         Input::SolverApproach getSolverApproach() const { return solver_approach; }
 
-        bool useRelaxation() const { return relaxation; }
-        bool useLazyCallback() const { return lazy_callback; }
+        Input::MethodDepGeneral getMethodDepGeneral() const { return method_dep_gen; }
 
         // General parameters
-        double getTimeLimit() const { return time_limit; }
+        double getTimeLimit() const { 
+            if(solver_approach == Input::SolverApproach::TR_SAA) return (time_limit/nbproblemsSAA);
+            else return time_limit;
+        }
         int getNbThreads() const { return nb_threads; }
         int getVerbose() const { return verbose; }
         double getEpsBigM() const { return eps_bigm; }
@@ -191,5 +210,6 @@ std::ostream& operator<<(std::ostream&, const Input::FollowerBehavior &);
 std::ostream& operator<<(std::ostream&, const Input::TypesDepStrongWeak &);
 std::ostream& operator<<(std::ostream&, const Input::TypesDepGeneral &);
 std::ostream& operator<<(std::ostream&, const Input::SolverApproach &);
+std::ostream& operator<<(std::ostream&, const Input::MethodDepGeneral &);
 
 #endif

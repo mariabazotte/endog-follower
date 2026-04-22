@@ -4,10 +4,12 @@
 #include "../../input/input.hpp"
 
 #include <map>
+#include <cmath>
 #include <vector>
 #include <memory>
 #include <fstream>
 #include <iostream>
+#include <algorithm>
 
 struct BilevelVariable {
     int id;
@@ -59,10 +61,14 @@ struct BilevelModel {
 
     int nb_follower_eq_constrs;
 
+    // alignment
+    double alignment;
+
     BilevelModel(std::string);
 
     private:
         void computeFollowerConstrsBounds();
+        void computeAlignment();
 };
 
 #endif

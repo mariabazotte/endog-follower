@@ -2,9 +2,9 @@
 
 void Input::defaultParams(){
     // Problem definition
-    is_follower_near_optimal = false; // Follower is optimal
-    eps_near_optimal = 0.05;
-    is_near_optimal_mult = true;
+    is_follower_near_optimal = true; 
+    eps_near_optimal = 0.01;
+    is_near_optimal_mult = false;
     
     // Parameters for Fixed Strong-Weak
     fix_cooperation_level = 0.5;
@@ -15,14 +15,19 @@ void Input::defaultParams(){
     fragile_param = 3.0;
     strong_power_param = 2.0;
     fragile_power_param = 2.0;
-    strwk_nb_pwl_intervals = 200;
+    strwk_nb_pwl_intervals = 100;
+    rel_error_pwl = 1;
+    abs_error_pwl = 1e-4;
 
     // Parameters for Type of Decision-Dependent General case
     gen_nb_intervals = 4;
     gen_scaling_param = 1.0;
-    gen_step_explicit = true;
     defineGeneralIntervals();
-
+    int_method_dep_gen = 1;
+    method_dep_gen = MethodDepGeneral(int_method_dep_gen);
+    gen_step_explicit = true;
+    gen_step_explicit_grbminmax = false;
+    
     // Problem solution
     int_solver_approach = 0;
     solver_approach = SolverApproach(int_solver_approach);
@@ -36,17 +41,14 @@ void Input::defaultParams(){
     // Parameters for SAA or evaluation analysis
     nbproblemsSAA = 5;
     nbscenariosSAA = 100;
-    nbthinningSAA = 5;
+    nbthinningSAA = 2;
 
     nbvalidateproblems = 5;
     nbvalidatescenarios = 10000;
     nbvalidatethinning = 50;
 
-    coordinate_har = false;
-    metropolis_hastings = true;
-
-    relaxation = false;
-    lazy_callback = true;
+    coordinate_har = true;
+    metropolis_hastings = false;
 }
 
 Input::Input(int argc, char* argv[]){
@@ -74,7 +76,8 @@ Input::Input(int argc, char* argv[]){
             int_type_dep_general = std::stoi(argv[i+1]);
             type_dep_general = TypesDepGeneral(int_type_dep_general);
             mandatory_dep_gen = true;
-        }else if(std::string(argv[i]) == "-near_opt")  // Optional :: Instance and Behavior
+        }
+        else if(std::string(argv[i]) == "-near_opt")  // Optional :: Instance and Behavior
             is_follower_near_optimal = std::stoi(argv[i+1]);  
         else if(std::string(argv[i]) == "-eps_near_opt")  
             eps_near_optimal = std::stod(argv[i+1]); 
@@ -97,14 +100,19 @@ Input::Input(int argc, char* argv[]){
             defineGeneralIntervals();
         }else if(std::string(argv[i]) == "-scal_param")
             gen_scaling_param = std::stod(argv[i+1]);
-        else if(std::string(argv[i]) == "-expl_step")
+        else if(std::string(argv[i]) == "-method_dep_gen"){
+            int_method_dep_gen = std::stoi(argv[i+1]);
+            method_dep_gen = Input::MethodDepGeneral(int_method_dep_gen);
+        }else if(std::string(argv[i]) == "-expl_step")
             gen_step_explicit = std::stoi(argv[i+1]);
+        else if(std::string(argv[i]) == "-expl_step_minmax")
+            gen_step_explicit_grbminmax = std::stoi(argv[i+1]);
         else if(std::string(argv[i]) == "-sol"){ // Optional :: Solution 
             int_solver_approach = std::stoi(argv[i+1]);
             solver_approach = SolverApproach(int_solver_approach);
         }else if(std::string(argv[i]) == "-timelimit") // Optional :: General parameters
             time_limit = std::stod(argv[i+1]);   
-        else if(std::string(argv[i]) == "-nbthreads") 
+        else if(std::string(argv[i]) == "-nbthreads")
             nb_threads = std::stoi(argv[i+1]);
         else if(std::string(argv[i]) == "-verbose")
             verbose = std::stoi(argv[i+1]);
@@ -153,19 +161,49 @@ Input::Input(int argc, char* argv[]){
     defineSolutionFile();
 }
 
+// Auxiliar input for computing bounds.
+Input::Input(const Input & input, double fix_strwk){
+    // Problem definition.
+    is_follower_near_optimal = input.isFollowerNearOpt(); 
+    eps_near_optimal = input.getEpsNearOpt();
+    is_near_optimal_mult = input.isNearOptMult();
+
+    // Define it as fix strong weak.
+    int_follower_behavior = 0;
+    follower_behavior = FollowerBehavior(int_follower_behavior);
+
+    // Parameters for Fixed Strong-Weak
+    fix_cooperation_level = fix_strwk;
+
+    // Define instance.
+    instance_file = input.getInstanceFile();
+
+    // Problem solution
+    int_solver_approach = 1;
+    solver_approach = SolverApproach(int_solver_approach);
+
+    // General parameters
+    time_limit = 600;
+    nb_threads = input.getNbThreads();
+    verbose = 1;
+    eps_bigm = 0.001;
+}
+
 void Input::defineGeneralIntervals(){
-    gen_intervals.resize(gen_nb_intervals+1);
-    gen_coeff_intervals.resize(gen_nb_intervals);
-    double interval = 1.0 / static_cast<double>(gen_nb_intervals);
-    for(int i = 0; i <= gen_nb_intervals; ++i) 
-        gen_intervals[i] = i*interval;
-    gen_max_coeff_intervals = 0.0;
-    for(int i = 0; i < gen_nb_intervals; ++i){
-        // gen_coeff_intervals[i] = 0.5 - (gen_intervals[i]+gen_intervals[i+1])/2.0;
-        gen_coeff_intervals[i] = 1.0 - (gen_intervals[i]+gen_intervals[i+1]);
-        gen_max_coeff_intervals = std::max(gen_max_coeff_intervals,gen_coeff_intervals[i]);
+    if(gen_nb_intervals > 0){
+        gen_intervals.resize(gen_nb_intervals+1);
+        gen_coeff_intervals.resize(gen_nb_intervals);
+        double interval = 1.0 / static_cast<double>(gen_nb_intervals);
+        for(int i = 0; i <= gen_nb_intervals; ++i) 
+            gen_intervals[i] = i*interval;
+        gen_max_coeff_intervals = 0.0;
+        for(int i = 0; i < gen_nb_intervals; ++i){
+            // gen_coeff_intervals[i] = 0.5 - (gen_intervals[i]+gen_intervals[i+1])/2.0;
+            gen_coeff_intervals[i] = 1.0 - (gen_intervals[i]+gen_intervals[i+1]);
+            gen_max_coeff_intervals = std::max(gen_max_coeff_intervals,gen_coeff_intervals[i]);
+        }
+        gen_max_coeff_intervals += 1e-8;
     }
-    gen_max_coeff_intervals += 1e-8;
 }
 
 void Input::defineSolutionFile(){
@@ -202,15 +240,26 @@ void Input::defineSolutionFile(){
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         solution_file += "depgeneral/";
         if(type_dep_general == Input::TypesDepGeneral::Neutral)
-            solution_file += "neutral/explstep" + std::to_string(gen_step_explicit) + "_";
+            solution_file += "neutral/";
         if(type_dep_general == Input::TypesDepGeneral::GenProportional)
-            solution_file += "proportional/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+            solution_file += "proportional/nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_"; 
         if(type_dep_general == Input::TypesDepGeneral::GenFragile)
-            solution_file += "fragile/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+            solution_file += "fragile/nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
         if(type_dep_general == Input::TypesDepGeneral::GenFragilePower)
-            solution_file += "fragile_power/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+            solution_file += "fragile_power/nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
         if(type_dep_general == Input::TypesDepGeneral::GenStrongPower)
-            solution_file += "strong_power/explstep" + std::to_string(gen_step_explicit) + "_nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+            solution_file += "strong_power/nbintv" + std::to_string(gen_nb_intervals) + "_scal" + doubleToString(gen_scaling_param) + "_";
+
+        if(method_dep_gen == Input::MethodDepGeneral::SingleLevel)
+            solution_file += "sglevel_explstep" + std::to_string(gen_step_explicit) + "_grbminmax" + std::to_string(gen_step_explicit_grbminmax) + "_";
+        if(method_dep_gen == Input::MethodDepGeneral::Relax)
+            solution_file+= "relax_";
+        if(method_dep_gen == Input::MethodDepGeneral::Penalty)
+            solution_file+= "penalty_";
+        if(method_dep_gen == Input::MethodDepGeneral::LocalSearch)
+            solution_file+= "ls_";
+        if(method_dep_gen == Input::MethodDepGeneral::Callback)
+            solution_file+= "callback_";
     }
 
     // Configuration corresponding to follower optimiality.
@@ -222,7 +271,7 @@ void Input::defineSolutionFile(){
 
     // Configuration corresponding to instance.
     solution_file += "_" + instfile.substr(0, instfile.size()-4);
-    
+
     // Configuration corresponding to SAA method: SAA problem and evaluation problem.
     if(solver_approach != Input::SolverApproach::DEP) {   
         solution_file += "_nbsaapr" + std::to_string(nbproblemsSAA) + 
@@ -237,24 +286,32 @@ void Input::defineSolutionFile(){
                              "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
                              "_nbvalth" + std::to_string(nbvalidatethinning);
             solution_file += "_coordhar" + std::to_string(coordinate_har);
-            // solution_file += "_metrophas" + std::to_string(metropolis_hastings);
+            solution_file += "_metrophas" + std::to_string(metropolis_hastings);
         }
+    }else{
+        if(follower_behavior == Input::FollowerBehavior::DepStrongWeak)
+            solution_file += "_errpwl" + std::to_string(abs_error_pwl);
+            // solution_file += "_errpwl" + std::to_string(rel_error_pwl);
+            // solution_file += "_intpwl" + std::to_string(strwk_nb_pwl_intervals);
+    }
+
+    // Initializing comparison file with information on model solved to obtain leader decision. 
+    comparison_file = solution_file;
+
+    if(follower_behavior != Input::FollowerBehavior::DepGeneral){
+        // Configuration to evaluate other configurations with the decision obtained
+        // by the considered problem.
+        comparison_file += "_nbvalpr" + std::to_string(nbvalidateproblems) + 
+                            "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
+                            "_nbvalth" + std::to_string(nbvalidatethinning);
+        comparison_file += "_coordhar" + std::to_string(coordinate_har);
+        comparison_file += "_metrophas" + std::to_string(metropolis_hastings);
     }
 
     // Configuration corresponding to general parameters.
     int aux_time = time_limit;
     solution_file +=  "_time" + std::to_string(aux_time);
-
-    // Initializing comparison file with information on model solved to obtain leader decision. 
-    comparison_file = solution_file;
-
-    // Configuration to evaluate other configurations with the decision obtained
-    // by the considered problem.
-    comparison_file += "_nbvalpr" + std::to_string(nbvalidateproblems) + 
-                       "_nbvalsc" + std::to_string(nbvalidatescenarios) + 
-                       "_nbvalth" + std::to_string(nbvalidatethinning);
-    comparison_file += "_coordhar" + std::to_string(coordinate_har);
-    comparison_file += "_metrophas" + std::to_string(metropolis_hastings);
+    comparison_file +=  "_time" + std::to_string(aux_time);
 
     comparison_file += "_comparison.csv";
     solution_file += "_solution.csv"; 
@@ -292,6 +349,14 @@ void Input::testParameters(){
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         if(int_type_dep_general > 4){
             throw std::runtime_error(std::string("Wrong type of general decision-dependent cooperation value."));
+            exit(0);
+        }
+        if(int_method_dep_gen > 4){
+            throw std::runtime_error(std::string("Wrong type of general decision-dependent method value."));
+            exit(0);
+        }
+        if(int_method_dep_gen == 2){
+            throw std::runtime_error(std::string("Penalty method for general decision-dependent method is obsolete. Change method."));
             exit(0);
         }
     }
@@ -367,8 +432,13 @@ void Input::testParameters(){
 
     if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         if(type_dep_general != Input::TypesDepGeneral::Neutral){
-            if(gen_nb_intervals <= -1e-8){
-                std::cout << "Nb. intervals parameter must be > 0. Setting parameter to default value 4." << std::endl;
+            if(gen_nb_intervals <= (-1 - 1e-8)){
+                std::cout << "Nb. intervals parameter must be >= -1. Setting parameter to default value 4." << std::endl;
+                gen_nb_intervals = 4;
+            }
+
+            if((method_dep_gen != Input::MethodDepGeneral::Callback && method_dep_gen != Input::MethodDepGeneral::LocalSearch) && gen_nb_intervals <= 1e-8){
+                std::cout << "Nb. intervals parameter must be > 0 for methods different from callback and local search. Setting parameter to default value 4." << std::endl;
                 gen_nb_intervals = 4;
             }
 
@@ -391,6 +461,21 @@ void Input::testParameters(){
                     std::cout << "Scaling parameter must be >= 1.0 for general strong power case. Setting parameter to default value 1.0." << std::endl;
                     gen_scaling_param = 1.0;
                 }
+            }
+        }
+
+        if(type_dep_general != Input::TypesDepGeneral::Neutral){
+            if(method_dep_gen == Input::MethodDepGeneral::Penalty || method_dep_gen == Input::MethodDepGeneral::Relax || method_dep_gen == Input::MethodDepGeneral::LocalSearch || method_dep_gen == Input::MethodDepGeneral::Callback){
+                if(metropolis_hastings == true){
+                    std::cout << "Relax, Penalty, Local Search and Callback methods works with slice sampling formulation. Setting metropolis hastings to false." << std::endl;
+                    metropolis_hastings = false;  
+                }
+            }
+        }
+
+        if(method_dep_gen == Input::MethodDepGeneral::SingleLevel){
+            if(gen_step_explicit == false){
+                gen_step_explicit_grbminmax = false;
             }
         }
     }
@@ -420,10 +505,14 @@ void Input::display(){
             std::cout << "FRAGILE POW PARAM:  " << fragile_power_param << std::endl;
     }if(follower_behavior == Input::FollowerBehavior::DepGeneral){
         std::cout << "COOPERATION TYPE :  " << type_dep_general << std::endl;
-        std::cout << "EXPL STEP        :  " << gen_step_explicit << std::endl;
         if(type_dep_general != Input::TypesDepGeneral::Neutral){
             std::cout << "NB INTERVALS     :  " << gen_nb_intervals << std::endl;
             std::cout << "SCALING PARAM    :  " << gen_scaling_param << std::endl;
+        }
+        std::cout << "METHOD           :  " << method_dep_gen << std::endl;
+        if(method_dep_gen == Input::MethodDepGeneral::SingleLevel){
+            std::cout << "EXPL STEP        :  " << gen_step_explicit << std::endl;
+            std::cout << "GRB MAX/MIN      :  " << gen_step_explicit_grbminmax << std::endl;
         }
     }std::cout << "--------------------------------------" << std::endl;
     std::cout << "NEAR OPTIMAL     :  " << is_follower_near_optimal << std::endl;
@@ -466,10 +555,15 @@ void Input::write(std::string output){
             if(type_dep_strongweak == Input::TypesDepStrongWeak::FragilePower) solFile << fragile_power_param << ";";
         }if(follower_behavior == Input::FollowerBehavior::DepGeneral){
             solFile << type_dep_general << ";";
-            solFile << gen_step_explicit << ";";
             if(type_dep_general != Input::TypesDepGeneral::Neutral){
                 solFile << gen_nb_intervals << ";";
                 solFile << gen_scaling_param << ";";
+            }
+            solFile << method_dep_gen << ";";
+            if(method_dep_gen == Input::MethodDepGeneral::SingleLevel){
+                solFile << gen_step_explicit << ";";
+                solFile << gen_step_explicit_grbminmax << ";";
+
             }
         }
         solFile << solver_approach << ";";
@@ -489,6 +583,7 @@ void Input::write(std::string output){
                 solFile << metropolis_hastings << ";";
             }
         }
+        solFile << instance_align << ";";
         solFile << output;
         solFile << std::endl;
     }
@@ -501,9 +596,11 @@ void Input::writeHead(std::string output){
            type_dep_strongweak != Input::TypesDepStrongWeak::Proportional) 
             solFile << "PARAM;";
         if(follower_behavior == Input::FollowerBehavior::DepGeneral){
-            solFile << "EXPL_STEP;";
             if(type_dep_general != Input::TypesDepGeneral::Neutral)
                 solFile << "NB_INTERVALS;SCALING;";
+            solFile << "METHOD;";
+            if(method_dep_gen == Input::MethodDepGeneral::SingleLevel)
+                solFile << "EXPL_STEP;GRB_MINMAX;";
         }
         solFile << "SOLUTION;NEAR_OPT;EPS_NEAR_OPT;MULT_NEAR_OPT;INSTANCE_FILE;";
         if(solver_approach == Input::SolverApproach::TR_SAA){
@@ -512,6 +609,7 @@ void Input::writeHead(std::string output){
                 solFile << "NB_VAL_PROBLEMS;NB_VAL_SCENARIOS;NB_VAL_THINNING;COORDINATE_HAR;METROPOLIS_HAS;";
             }
         }
+        solFile << "ALIGNMENT;";
         solFile << output;
         solFile << std::endl;
     }
@@ -625,6 +723,36 @@ std::ostream& operator<<(std::ostream& lhs, const Input::SolverApproach & solver
         }
         case Input::SolverApproach::DEP: {
             lhs << "Deterministic_Equivalent";
+            break;
+        }
+        default :{
+            lhs << "";
+            break;
+        }
+    }
+    return lhs;
+}
+
+std::ostream& operator<<(std::ostream& lhs, const Input::MethodDepGeneral & method) {
+    switch(method) {
+        case Input::MethodDepGeneral::SingleLevel: {
+            lhs << "SingleLevel";
+            break;
+        }
+        case Input::MethodDepGeneral::Relax: {
+            lhs << "Relax";
+            break;
+        }
+        case Input::MethodDepGeneral::Penalty: {
+            lhs << "Penalty";
+            break;
+        }
+        case Input::MethodDepGeneral::LocalSearch: {
+            lhs << "LocalSearch";
+            break;
+        }
+        case Input::MethodDepGeneral::Callback: {
+            lhs << "Callback";
             break;
         }
         default :{

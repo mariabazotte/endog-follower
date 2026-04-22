@@ -2,8 +2,8 @@
 #include "../../leadersolver/leadersolver.hpp"
 
 void FixStrongWeakFollowerSolver::defineLeaderObj(){
-    Fs.set(GRB_DoubleAttr_Obj,input.getFixCoopLevel());
-    Fw.set(GRB_DoubleAttr_Obj,(1.0-input.getFixCoopLevel()));
+    if(input.getFixCoopLevel() >= 0.0001) Fs.set(GRB_DoubleAttr_Obj,input.getFixCoopLevel());
+    if(input.getFixCoopLevel() <= 0.9999) Fw.set(GRB_DoubleAttr_Obj,(1.0-input.getFixCoopLevel()));
 }
 
 void FixStrongWeakFollowerSolver::evaluate(double & mean, double & variance, double & f_mean, double & f_variance){  

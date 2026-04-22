@@ -4,8 +4,6 @@ import os
 
 import gurobipy as gp
 from gurobipy import GRB
-
-# TODO: minmax objective: how to change followers objective to remove minmax?
  
 class Data():
     ''' Read data. '''
@@ -249,7 +247,7 @@ class Data():
     def getFollowerUpperBound(self,leader_vars,follower_vars,leader_constrs,follower_constrs):
         
         # Solve gurobi model to obtain upper bound on follower objective.
-        # We want the leader decision that yields the mininum optimal value for the follower objective. (max-min problem)
+        # We want the leader decision that yields the maximum optimal value for the follower objective. (max-min problem)
         fub_model = gp.Model()
 
         # Leader variables and constraints.

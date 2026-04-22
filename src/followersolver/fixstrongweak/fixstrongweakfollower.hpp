@@ -9,8 +9,9 @@
 class FixStrongWeakFollowerSolver : public AbstractFollowerSolver {
     protected:
         void create(){
-            defineOptimisticFollower();
-            definePessimisticFollower();
+            defineOptimalFollower(); // Define follower's optimality.
+            if(input.getFixCoopLevel() >= 0.0001) defineOptimisticFollower();
+            if(input.getFixCoopLevel() <= 0.9999) definePessimisticFollower();
             defineLeaderObj();
         }
 

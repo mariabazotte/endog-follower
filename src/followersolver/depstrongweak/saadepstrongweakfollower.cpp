@@ -2,42 +2,58 @@
 #include "../../leadersolver/leadersolver.hpp"
 
 void SAADepStrWkFollowerSolver::defineLeaderObj(){
-    z = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_BINARY);
+    z = leader->getGRBModel()->addVars(instance.getStrongWeakNbScenarios(pr),GRB_BINARY);
 
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        double a_s = instance.getStrongWeakScenario(pr,s);
-        double eps = input.getEpsBigM();
-        leader->getGRBModel()->addConstr(fs <= a_s + (instance.getModel()->follower_ub-a_s)*(1.0 - z[s]));
-        leader->getGRBModel()->addConstr(fs >= (a_s + eps) - (a_s + eps - instance.getModel()->follower_lb)*(z[s]));
+    bool sequence = false;
+    if(sequence == true){
+        for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s){
+            double a_s = instance.getStrongWeakScenario(pr,s);
+            double eps = input.getEpsBigM();
+            leader->getGRBModel()->addConstr(fs <= a_s + ((instance.getModel()->follower_ub + 0.001)-a_s)*(1.0 - z[s]));
+            // leader->getGRBModel()->addConstr(fs >= (a_s + eps) - (a_s + eps - (instance.getModel()->follower_lb - 0.1))*(z[s]));
+        }
+
+        // for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s){
+        //     double a_s = instance.getStrongWeakScenario(pr,s);
+        //     double eps = input.getEpsBigM();
+        //     leader->getGRBModel()->addGenConstrIndicator(z[s], 1, fs <= a_s);
+        //     leader->getGRBModel()->addGenConstrIndicator(z[s], 0, fs >= a_s + eps);
+        // }
+
+        for(int s = 0; s < instance.getStrongWeakNbScenarios(pr)-1; ++s){
+            leader->getGRBModel()->addConstr(z[s] >= z[s+1]);
+        }
+
+    }else{
+        GRBLinExpr expr = 0;
+        for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s) expr += z[s];
+        leader->getGRBModel()->addConstr(expr <= 1.0);
+
+        for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s){
+            double a_s = instance.getStrongWeakScenario(pr,s);
+            leader->getGRBModel()->addConstr(fs <= a_s + ((instance.getModel()->follower_ub + 0.001)-a_s)*(1.0 - z[s]));
+            // leader->getGRBModel()->addGenConstrIndicator(z[s], 1, fs <= a_s);
+        }
     }
 
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        double a_s = instance.getStrongWeakScenario(pr,s);
-        double eps = input.getEpsBigM();
-        leader->getGRBModel()->addGenConstrIndicator(z[s], 1, fs <= a_s);
-        leader->getGRBModel()->addGenConstrIndicator(z[s], 0, fs >= a_s + eps);
-    }
-
-    for(int s = 0; s < instance.getNbScenarios()-1; ++s){
-        leader->getGRBModel()->addConstr(z[s] >= z[s+1]);
-    }
-
-    GRBVar *delta = leader->getGRBModel()->addVars(instance.getNbScenarios(),GRB_CONTINUOUS);
-    double bigm = instance.getModel()->leader_ub - instance.getModel()->leader_lb;
-    for(int s = 0; s < instance.getNbScenarios(); ++s){
-        leader->getGRBModel()->addConstr(delta[s] <= (Fw - Fs));
+    GRBVar *delta = leader->getGRBModel()->addVars(instance.getStrongWeakNbScenarios(pr),GRB_CONTINUOUS);
+    double bigm = leader->getGeneralUB() - leader->getGeneralLB();
+    // double bigm = instance.getModel()->leader_ub - instance.getModel()->leader_lb;
+    
+    for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s){
+        leader->getGRBModel()->addConstr(delta[s] <= (Fw - Fs) + 0.0001);
         leader->getGRBModel()->addConstr(delta[s] >= (Fw - Fs) - bigm*(1.0 - z[s]));
         leader->getGRBModel()->addConstr(delta[s] <= bigm*z[s]);
 
-        leader->getGRBModel()->addGenConstrIndicator(z[s], 1, delta[s] == (Fw - Fs));
-        leader->getGRBModel()->addGenConstrIndicator(z[s], 0, delta[s] == 0.0);
+        // leader->getGRBModel()->addGenConstrIndicator(z[s], 1, delta[s] == (Fw - Fs));
+        // leader->getGRBModel()->addGenConstrIndicator(z[s], 0, delta[s] == 0.0);
     }
 
     Fw.set(GRB_DoubleAttr_Obj,1.0);
-    for(int s = 0; s < instance.getNbScenarios(); ++s) {
-        delta[s].set(GRB_DoubleAttr_Obj,-(1.0/(double)instance.getNbScenarios()));
+    for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s) {
+        if(sequence == true) delta[s].set(GRB_DoubleAttr_Obj,-(1.0/(double)instance.getNbScenarios()));
+        else delta[s].set(GRB_DoubleAttr_Obj,-((instance.getStrongWeakWeight(pr,s))/(double)instance.getNbScenarios()));
     }
-
 }
 
 void SAADepStrWkFollowerSolver::evaluate(double & mean, double & variance, double & f_mean, double & f_variance){
@@ -58,6 +74,6 @@ void SAADepStrWkFollowerSolver::evaluate(double & mean, double & variance, doubl
 
 void SAADepStrWkFollowerSolver::computeStrongWeakInteriorSolutions(){
     if(z[0].get(GRB_DoubleAttr_X) <= 0.001) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(true,false,true);
-    else if(z[instance.getNbScenarios()-1].get(GRB_DoubleAttr_X) >= 0.999) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,true,true);
+    else if(z[instance.getStrongWeakNbScenarios(pr)-1].get(GRB_DoubleAttr_X) >= 0.999) AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,true,true);
     else AbstractFollowerSolver::computeStrongWeakInteriorSolutions(false,false,true);
 }

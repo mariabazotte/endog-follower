@@ -13,6 +13,7 @@ class SAADepStrWkFollowerSolver : public AbstractFollowerSolver {
         GRBVar * z = NULL;
 
         void create(){
+            defineOptimalFollower(); // Define follower's optimality.
             defineOptimisticFollower();
             definePessimisticFollower();
             defineLeaderObj();
