@@ -47,13 +47,9 @@ instance_configs = [
     [[260, 1040, 260], ["xuwang-bmilplib_260_"]],\
 ]
 
-modified = 0
+upd_instances = True
 
-name_folder = None
-if modified == 0:
-    name_folder = "../results/"
-if modified == 1:
-    name_folder = "../results/"
+name_folder = "../results/"
 # 
 ############################################################################################################
 #                                              Behaviors
@@ -61,7 +57,7 @@ if modified == 1:
 
 # Follower near/optimality
 near_opt     = 1
-eps_near_opt = 0.05
+eps_near_opt = 0.01
 mul_near_opt = 0
 
 # Follower behaviors
@@ -109,6 +105,10 @@ def get_name_behavior_config(bv_config):
 nb_saa_problems  = {1: 1, 2: 1} 
 nb_saa_scenarios = {1: 100, 2: 1000} 
 nb_saa_thinning  = {1: 1, 2: 5} 
+
+if upd_instances:
+    nb_saa_scenarios[2] = 1500
+    nb_saa_thinning[2] = 10
 
 # Evaluation with sampling only defined for behavior 2 (Decision-dependent general).
 # For behaviors 1 and 2 we can enumerate the endogenous scenarios and compute the 
@@ -186,9 +186,8 @@ def get_file_name(instance,seed,bv_cfg,sol=""):
 
     # Instance parameters.
     name += "_" + instance + str(seed)
-
-    if modified == 1:
-        name += "_a0.5"
+    if upd_instances == True:
+        name += "_mod"
 
     # SAA parameters.
     if (bv == 1 and sol == 'saa'): 
@@ -980,8 +979,6 @@ def main():
     path = name_folder + 'compiled/results_nearopt' + str(near_opt) 
     if near_opt:
         path += '_eps' + str(eps_near_opt) + "_mult" + str(mul_near_opt)
-    if modified == 1:
-        path += "_a0.5"
     path += '.xlsx'
     with pd.ExcelWriter(path) as writer:
         # General instances.
@@ -1031,19 +1028,14 @@ def main():
 
                                 df_sol_saa = pd.read_csv(name_sol_file_saa,delimiter=';')
                                 df_sol_dep = pd.DataFrame(columns=["empty"])
-                                if modified == 0:
-                                    df_sol_dep = pd.read_csv(name_sol_file_dep,delimiter=';')
+                                df_sol_dep = pd.read_csv(name_sol_file_dep,delimiter=';')
 
                                 try:
                                     df_cmp = pd.read_csv(name_cmp_file,delimiter=';')
                                 except pd.errors.EmptyDataError:
                                     df_cmp = pd.DataFrame(columns=["empty"])
                                 
-                                align = np.nan
-                                if modified == 0:
-                                    align = add_dict_sol_all_align(bv,df_sol_dep)
-                                else:
-                                    align = add_dict_sol_all_align(bv,df_sol_saa)
+                                align = add_dict_sol_all_align(bv,df_sol_dep)
                                 add_dict_sol_all_dep(bv,df_sol_dep)
                                 add_dict_sol_all_saa(bv,df_sol_saa)
                                 add_dict_sol_all_comp(bv)

@@ -31,7 +31,7 @@ void SAADepStrWkFollowerSolver::defineLeaderObj(){
 
         for(int s = 0; s < instance.getStrongWeakNbScenarios(pr); ++s){
             double a_s = instance.getStrongWeakScenario(pr,s);
-            leader->getGRBModel()->addConstr(fs <= a_s + ((instance.getModel()->follower_ub + 0.001)-a_s)*(1.0 - z[s]));
+            leader->getGRBModel()->addConstr(fs <= a_s + ((instance.getModel()->follower_ub + 0.01)-a_s)*(1.0 - z[s]));
             // leader->getGRBModel()->addGenConstrIndicator(z[s], 1, fs <= a_s);
         }
     }

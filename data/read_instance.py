@@ -1,9 +1,17 @@
 import gzip
 import tarfile
 import os
+import random
 
 import gurobipy as gp
 from gurobipy import GRB
+
+
+random.seed(42)
+
+# mod_instances = False : generate instances with original follower objective
+# mod_instances = True: generate instances with modified follower objective
+mod_instances = True
  
 class Data():
     ''' Read data. '''
@@ -163,8 +171,14 @@ class Data():
             if var_name in data_follower["vars"]: # This is a follower variable.
                 # Transform variable into continuous to obtain linear follower problem.
                 info["type"] = 'C'  
-                # Define follower objective.                               
-                info["obj_follower"] = data_follower["vars"][var_name] 
+                # Define follower objective.    
+                if mod_instances == False:                          
+                    info["obj_follower"] = data_follower["vars"][var_name] 
+                else:
+                    if random.uniform(0.0, 1.0) <= 0.5: 
+                        info["obj_follower"] = data_follower["vars"][var_name]
+                    else:
+                        info["obj_follower"] = 0.0
                 follower_vars[var_name] = info
             else: # This is a leader variable.
                 leader_vars[var_name] = info
@@ -199,6 +213,8 @@ class Data():
         # Solve gurobi model to obtain lower bound on follower objective.
         # We want the leader decision that yields the mininum optimal value for the follower objective.
         flb_model = gp.Model()
+
+        flb_model.setParam('timelimit',3600)
 
         x = flb_model.addVars([name for name, _ in leader_vars.items()],
                     lb=[info["lb"] for _, info in leader_vars.items()],
@@ -249,6 +265,8 @@ class Data():
         # Solve gurobi model to obtain upper bound on follower objective.
         # We want the leader decision that yields the maximum optimal value for the follower objective. (max-min problem)
         fub_model = gp.Model()
+
+        fub_model.setParam('timelimit',3600)
 
         # Leader variables and constraints.
         x = fub_model.addVars([name for name, _ in leader_vars.items()],
@@ -463,7 +481,10 @@ class Data():
 
     ''' Write current instance file. '''
     def writeInstanceFile(self,name_instance,leader_vars,follower_vars,leader_constrs,follower_constrs,leader_lb,leader_ub,follower_lb,follower_ub):
-        name = 'instances/' + name_instance + '.txt'
+        name = 'instances-new/' + name_instance 
+        if mod_instances == True:
+            name += "_mod"
+        name += '.txt'
         with open(name, 'w') as f:
             f.write( "%d %d %.3f %.3f\n" % (len(leader_vars),len(leader_constrs),leader_lb,leader_ub))
             f.write( "%d %d %.3f %.3f\n" % (len(follower_vars),len(follower_constrs),follower_lb,follower_ub))
